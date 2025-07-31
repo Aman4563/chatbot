@@ -1,0 +1,201 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Custom Scrollbar Styles */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 10px;
+  margin: 2px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  transition: all 0.2s ease;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: #f1f5f9;
+}
+
+/* Smart Scrollbar - Hidden by default, appears only when needed */
+.smart-scrollbar {
+  scrollbar-width: none; /* Firefox - hidden by default */
+  -ms-overflow-style: none; /* IE/Edge - hidden by default */
+}
+
+/* Show scrollbar only when content overflows and on hover/focus */
+.smart-scrollbar::-webkit-scrollbar {
+  width: 0px;
+  background: transparent;
+}
+
+.smart-scrollbar:hover::-webkit-scrollbar,
+.smart-scrollbar:focus::-webkit-scrollbar {
+  width: 6px;
+}
+
+.smart-scrollbar:hover::-webkit-scrollbar-track,
+.smart-scrollbar:focus::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.smart-scrollbar:hover::-webkit-scrollbar-thumb,
+.smart-scrollbar:focus::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #64748b, #475569);
+  border-radius: 8px;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.smart-scrollbar:hover::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #475569, #334155);
+}
+
+/* Show scrollbar when content actually overflows */
+.smart-scrollbar::-webkit-scrollbar {
+  width: 0px;
+}
+
+.smart-scrollbar[style*="height"]::-webkit-scrollbar {
+  width: 6px;
+}
+
+.smart-scrollbar[style*="height"]::-webkit-scrollbar-track {
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.smart-scrollbar[style*="height"]::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #cbd5e1, #94a3b8);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.smart-scrollbar[style*="height"]::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #94a3b8, #64748b);
+}
+
+/* Firefox fallback */
+@supports (scrollbar-width: thin) {
+  .smart-scrollbar {
+    scrollbar-width: none;
+  }
+  
+  .smart-scrollbar:hover,
+  .smart-scrollbar:focus {
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 #f8fafc;
+  }
+}
+
+/* globals.css */
+@import 'highlight.js/styles/github.css';
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* Enhanced bounce animation for typing indicator */
+@keyframes bounce {
+  0%, 20%, 53%, 80%, 100% {
+    transform: translate3d(0,0,0);
+  }
+  40%, 43% {
+    transform: translate3d(0, -8px, 0);
+  }
+  70% {
+    transform: translate3d(0, -4px, 0);
+  }
+  90% {
+    transform: translate3d(0, -2px, 0);
+  }
+}
+
+.markdown-content {
+  line-height: 1.6;
+}
+
+.markdown-content pre {
+  background-color: #f6f8fa !important;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  font-size: 85%;
+  line-height: 1.45;
+  overflow: auto;
+  padding: 16px;
+}
+
+.markdown-content code {
+  background-color: rgba(175, 184, 193, 0.2);
+  border-radius: 3px;
+  font-size: 85%;
+  margin: 0;
+  padding: 0.2em 0.4em;
+}
+
+.markdown-content table {
+  border-collapse: collapse;
+  margin: 15px 0;
+  width: 100%;
+}
+
+.markdown-content table th,
+.markdown-content table td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+.markdown-content table th {
+  background-color: #f2f2f2;
+  font-weight: bold;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 20px 0;
+}

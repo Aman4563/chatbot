@@ -1,0 +1,9 @@
+{
+  "message": {
+    "text": "Hello, bot!",
+    "files": []
+  },
+  "history": [],
+  "system_prompt": "You are a helpful assistant.",
+  "model_name": "gemini-1.5-flash"
+}
