@@ -7,24 +7,40 @@ import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/atom-one-dark.css';
 import { visit } from 'unist-util-visit';
 
+// Add these imports after the existing lucide-react imports
+import { 
+  Send, 
+  Paperclip, 
+  X, 
+  Image, 
+  FileText, 
+  File, 
+  Download,
+  MessageCircle,
+  Bot,
+  User,
+  AlertCircle,
+  Upload,
+  Plus,
+  Copy,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  MessageSquare,
+  Edit3  // ADD THIS
+} from 'lucide-react';
+
+// Add these imports after your existing chatSlice imports
 import { 
   setInput, 
   sendChatMessageStream, 
   addMessage, 
   createNewConversation,
-  toggleMessageEdit,
-  regenerateFromMessage,
-  navigateResponseVersion,    // ADD THIS
-  regenerateResponse,         // ADD THIS
+  toggleMessageEdit,        // ADD THIS
+  regenerateFromMessage,    // ADD THIS
   FileData,
-  Message,
-navigateUserEditVersion,    // new
-
+  Message 
 } from '../chatSlice';
-import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X } from 'lucide-react';
-import { AppDispatch } from '@/store';
-import { RootState } from '@reduxjs/toolkit/query';
-
 
 
 function rehypeStripHljs() {                       // ← ADD THIS
@@ -58,26 +74,6 @@ const Chat = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeConversation = conversations.find(conv => conv.id === activeConversationId);
-
-    // NEW handler for user‐edit navigation
-  const handleNavigateUserEdit = (
-    messageId: string,
-    direction: 'prev' | 'next'
-  ) => {
-    dispatch(navigateUserEditVersion({ messageId, direction }));
-  };
-  // ✅ CORRECTED LOCATION - Handler functions in main component scope
-  const handleNavigateResponse = (messageId: string, direction: 'prev' | 'next') => {
-    dispatch(navigateResponseVersion({ messageId, direction }));
-  };
-
-  const handleRegenerateResponse = async (messageId: string) => {
-    try {
-      await dispatch(regenerateResponse(messageId)).unwrap();
-    } catch (error) {
-      console.error('Failed to regenerate response:', error);
-    }
-  };
 
   useEffect(() => {
     if (conversations.length === 0) {
@@ -559,7 +555,7 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
             </div>
           )}
           
-{activeConversation.messages.map((msg, idx) => (
+          {activeConversation.messages.map((msg, idx) => (
   <div key={msg.id || idx} className={`mb-8 flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'}`}>
     <div className={`flex gap-4 max-w-4xl ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* Avatar */}
@@ -579,98 +575,27 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
 
       {/* Message Content */}
       <div className={`
-        px-5 py-4 rounded-2xl shadow-lg border backdrop-blur-sm flex-1 relative group
-        ${msg.sender === 'User' 
-          ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20' 
-          : 'bg-white/90 text-gray-800 border-gray-200/50'
-        }
-        ${msg.sender === 'User' ? 'rounded-tr-lg' : 'rounded-tl-lg'}
-      `}>
-        
-        {/* Navigation and action buttons */}
-        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
-          
-          {/* NEW: User edit navigation arrows */}
-          {msg.sender === 'User' && msg.edits && msg.edits.length > 1 && !msg.isEditing && !isLoading && (
-            <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200 mr-1">
-              <button
-                onClick={() => handleNavigateUserEdit(msg.id, 'prev')}
-                disabled={(msg.currentEditIndex || 0) === 0}
-                className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Previous edit"
-              >
-                <ChevronLeft className="w-4 h-4 text-gray-600" />
-              </button>
-              
-              <span className="text-xs text-gray-500 px-2 font-medium">
-                {(msg.currentEditIndex || 0) + 1} / {msg.edits.length}
-              </span>
-              
-              <button
-                onClick={() => handleNavigateUserEdit(msg.id, 'next')}
-                disabled={(msg.currentEditIndex || 0) === msg.edits.length - 1}
-                className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Next edit"
-              >
-                <ChevronRight className="w-4 h-4 text-gray-600" />
-              </button>
-            </div>
-          )}
+  px-5 py-4 rounded-2xl shadow-lg border backdrop-blur-sm flex-1 relative group
+  ${msg.sender === 'User' 
+    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20' 
+    : 'bg-white/90 text-gray-800 border-gray-200/50'
+  }
+  ${msg.sender === 'User' ? 'rounded-tr-lg' : 'rounded-tl-lg'}
+`}>
 
-          {/* Bot message navigation and regenerate buttons */}
-          {msg.sender === 'Bot' && !msg.isStreaming && !isLoading && (
-            <>
-              {/* Response navigation buttons */}
-              {msg.responses && msg.responses.length > 1 && (
-                <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200">
-                  <button
-                    onClick={() => handleNavigateResponse(msg.id, 'prev')}
-                    disabled={(msg.currentResponseIndex || 0) === 0}
-                    className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    title="Previous response"
-                  >
-                    <ChevronLeft className="w-4 h-4 text-gray-600" />
-                  </button>
-                  
-                  <span className="text-xs text-gray-500 px-2 font-medium">
-                    {(msg.currentResponseIndex || 0) + 1} / {msg.responses.length}
-                  </span>
-                  
-                  <button
-                    onClick={() => handleNavigateResponse(msg.id, 'next')}
-                    disabled={(msg.currentResponseIndex || 0) === (msg.responses?.length || 1) - 1}
-                    className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    title="Next response"
-                  >
-                    <ChevronRight className="w-4 h-4 text-gray-600" />
-                  </button>
-                </div>
-              )}
-              
-              {/* Regenerate button */}
-              <button
-                onClick={() => handleRegenerateResponse(msg.id)}
-                className="p-1.5 bg-white/90 hover:bg-gray-100 rounded-lg shadow-sm border border-gray-200 transition-all duration-200"
-                title="Regenerate response"
-              >
-                <RotateCcw className="w-4 h-4 text-gray-600" />
-              </button>
-            </>
-          )}
-          
-          {/* User message edit button */}
-          {msg.sender === 'User' && !msg.isEditing && !isLoading && (
-            <button
-              onClick={() => dispatch(toggleMessageEdit(msg.id))}
-              className="p-1.5 text-white/70 hover:text-white hover:bg-white/20 rounded-lg transition-all duration-200"
-              title="Edit message"
-            >
-              <Edit3 size={14} />
-            </button>
-          )}
-        </div>
         
-        {/* Message content rendering */}
+        {/* NEW: Edit button for user messages */}
+        {msg.sender === 'User' && !msg.isEditing && !isLoading && (
+          <button
+            onClick={() => dispatch(toggleMessageEdit(msg.id))}
+            className="absolute top-3 right-3 p-1.5 text-white/70 hover:text-white hover:bg-white/20 rounded-lg transition-all duration-200 opacity-0 group-hover:opacity-100"
+            title="Edit message"
+          >
+            <Edit3 size={14} />
+          </button>
+        )}
+        
+        {/* NEW: Conditional rendering for edit mode */}
         {msg.isEditing ? (
           <EditableMessage
             msg={msg}
@@ -700,14 +625,17 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
                         const hasLang = Boolean(className)
                         const isSingleLine = !text.includes('\n')
 
+                        // 1) true Markdown inline code: `<code>` in text
                         if (inline) {
                           return <InlineCode {...props}>{children}</InlineCode>
                         }
 
+                        // 2) single-line, no language hint → render inline
                         if (isSingleLine && !hasLang) {
                           return <InlineCode {...props}>{children}</InlineCode>
                         }
 
+                        // 3) otherwise full code block
                         return <CodeBlock className={className} {...props}>{children}</CodeBlock>
                       },
                       pre: ({ children }) => <>{children}</>,
@@ -822,28 +750,6 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
               <span className="inline-block w-0.5 h-5 bg-current ml-1 animate-pulse rounded-full"></span>
             )}
           </>
-        )}
-
-        {/* NEW: User edit version indicator at bottom for user messages */}
-        {msg.sender === 'User' && msg.edits && msg.edits.length > 1 && (
-          <div className="mt-3 pt-2 border-t border-blue-300/30 flex items-center justify-between text-xs text-white/70">
-            <span>Edit {(msg.currentEditIndex || 0) + 1} of {msg.edits.length}</span>
-            <div className="flex items-center gap-1">
-              <Edit3 className="w-3 h-3" />
-              <span>Multiple edits available</span>
-            </div>
-          </div>
-        )}
-
-        {/* Existing: Response version indicator at bottom for bot messages */}
-        {msg.sender === 'Bot' && msg.responses && msg.responses.length > 1 && (
-          <div className="mt-3 pt-2 border-t border-gray-200/50 flex items-center justify-between text-xs text-gray-500">
-            <span>Response {(msg.currentResponseIndex || 0) + 1} of {msg.responses.length}</span>
-            <div className="flex items-center gap-1">
-              <RotateCcw className="w-3 h-3" />
-              <span>Multiple responses available</span>
-            </div>
-          </div>
         )}
       </div>
     </div>

@@ -199,3 +199,14 @@ body {
   border-top: 1px solid #eee;
   margin: 20px 0;
 }
+
+
+/* Add this to your CSS file or in a <style> tag */
+.message-container:hover .edit-button {
+  opacity: 1;
+}
+
+.edit-button {
+  opacity: 0;
+  transition: opacity 0.2s ease-in-out;
+}
