@@ -1,5 +1,9 @@
 // chatSlice.ts
+
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
 
 export type FileData = {
   data: string;
@@ -15,13 +19,18 @@ export type Message = {
   files?: FileData[];
   isStreaming?: boolean;
   timestamp: string;
-  isEditing?: boolean;              // toggle edit‐mode
-  responses?: string[];             // Bot response versions
-  currentResponseIndex?: number;    // which Bot response is showing
-  // ──────────────────────────────────────────────────────────────────────────
-  edits?: string[];                 // NEW: User edit versions
-  currentEditIndex?: number;        // NEW: which User edit is showing
+  isEditing?: boolean;
+  responses?: string[];
+  currentResponseIndex?: number;
+  edits?: string[];
+  currentEditIndex?: number;
+  
+ // —— add these two —— 
+ branches?: Message[][];
+ currentBranchIndex?: number;
+
 };
+
 export type Conversation = {
   id: string;
   title: string;
@@ -29,6 +38,16 @@ export type Conversation = {
   model: string;
   createdAt: string;
   updatedAt: string;
+};
+
+// NEW: Model info interface matching backend
+export type ModelInfo = {
+  name: string;
+  display_name: string;
+  description: string;
+  supports_vision: boolean;
+  supports_files: boolean;
+  provider: string;
 };
 
 interface ChatState {
@@ -39,8 +58,18 @@ interface ChatState {
   error: string | null;
   streamingMessageIndex: number | null;
   selectedModel: string;
-  availableModels: string[];
+  availableModels: ModelInfo[]; // Changed from string[] to ModelInfo[]
+  modelsLoading: boolean;
+  modelsError: string | null;
+    searchResults: string[];
+  searchLoading: boolean;
+  searchError: string | null;
+  generatedImageUrl: string | null;
+  imageLoading: boolean;
+  imageError: string | null;
 }
+
+
 
 const initialState: ChatState = {
   conversations: [],
@@ -49,8 +78,16 @@ const initialState: ChatState = {
   isLoading: false,
   error: null,
   streamingMessageIndex: null,
-  selectedModel: 'gemini-2.5-flash',
-  availableModels: ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-2.5-pro'],
+  selectedModel: 'mistral-large', // Changed default to Mistral
+  availableModels: [],
+  modelsLoading: false,
+  modelsError: null,
+    searchResults: [],
+  searchLoading: false,
+  searchError: null,
+  generatedImageUrl: null,
+  imageLoading: false,
+  imageError: null,
 };
 
 const generateId = () => Date.now().toString() + Math.random().toString(36).substr(2, 9);
@@ -63,6 +100,74 @@ const formatHistoryForAPI = (messages: Message[]) => {
     files: msg.files || []
   }));
 };
+
+
+// 2️⃣ Define your new tool-calling thunks
+export const webSearch = createAsyncThunk<
+  string[],                             // returned payload: array of URLs
+  { query: string; num_results?: number }, // thunk arg
+  { rejectValue: string }
+>(
+  'chat/webSearch',
+  async ({ query, num_results = 5 }, { rejectWithValue }) => {
+    try {
+      const res = await fetch(
+  `${API_BASE}/tools/search?q=${encodeURIComponent(query)}&num_results=${num_results}`
+);
+      if (!res.ok) {
+        const text = await res.text();
+        return rejectWithValue(text || 'Search failed');
+      }
+      const json = (await res.json()) as { query: string; results: string[] };
+      return json.results;
+    } catch (err: any) {
+      return rejectWithValue(err.message ?? 'Network error');
+    }
+  }
+);
+
+export const generateImage = createAsyncThunk<
+  string,                   // returned payload: image URL
+  { prompt: string },       // thunk arg
+  { rejectValue: string }
+>(
+  'chat/generateImage',
+  async ({ prompt }, { rejectWithValue }) => {
+    try {
+      const res = await fetch(
+  `${API_BASE}/tools/image`,
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  }
+);
+
+      if (!res.ok) {
+        const text = await res.text();
+        return rejectWithValue(text || 'Image generation failed');
+      }
+      const json = (await res.json()) as { prompt: string; url: string };
+      return json.url;
+    } catch (err: any) {
+      return rejectWithValue(err.message ?? 'Network error');
+    }
+  }
+);
+
+
+// NEW: Fetch available models from backend
+export const fetchAvailableModels = createAsyncThunk(
+  'chat/fetchAvailableModels',
+  async () => {
+    const response = await fetch('http://localhost:8000/models');
+    if (!response.ok) {
+      throw new Error('Failed to fetch models');
+    }
+    const models: ModelInfo[] = await response.json();
+    return models;
+  }
+);
 
 export const sendChatMessageStream = createAsyncThunk(
   'chat/sendMessageStream',
@@ -139,7 +244,6 @@ export const sendChatMessageStream = createAsyncThunk(
   }
 );
 
-// NEW: Async thunk for regenerating response from a specific message
 export const regenerateFromMessage = createAsyncThunk(
   'chat/regenerateFromMessage',
   async ({ messageId, newText, files = [] }: { messageId: string; newText: string; files?: FileData[] }, { dispatch, getState }) => {
@@ -155,7 +259,6 @@ export const regenerateFromMessage = createAsyncThunk(
       throw new Error('Conversation not found');
     }
 
-    // Find the message index
     const messageIndex = currentConversation.messages.findIndex(msg => msg.id === messageId);
     if (messageIndex === -1) {
       throw new Error('Message not found');
@@ -226,7 +329,6 @@ export const regenerateFromMessage = createAsyncThunk(
   }
 );
 
-// NEW: Async thunk for regenerating new response versions
 export const regenerateResponse = createAsyncThunk(
   'chat/regenerateResponse',
   async (messageId: string, { dispatch, getState }) => {
@@ -299,7 +401,6 @@ export const regenerateResponse = createAsyncThunk(
               if (data.chunk) {
                 newResponseText += data.chunk;
               } else if (data.done) {
-                // Add new response to the message
                 dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
                 return 'Regeneration completed';
               }
@@ -354,6 +455,33 @@ const chatSlice = createSlice({
         state.selectedModel = conversation.model;
       }
     },
+      // inside your createSlice({ reducers: { … }})
+
+// switch which branch of continuation to show 
+setUserBranchIndex( 
+   state, 
+   action: PayloadAction<{ messageId: string; branchIndex: number }>
+ ) {
+   const conv = state.conversations.find(c => c.id === state.activeConversationId);
+   if (!conv) return; 
+   const msg = conv.messages.find(m => m.id === action.payload.messageId);
+   if (!msg || !msg.branches) return;
+   msg.currentBranchIndex = action.payload.branchIndex; 
+ },
+
+ // rebuild the conversation tail from head + that branch
+ replaceConversationTail(
+   state,
+   action: PayloadAction<{
+     conversationId: string;
+     head: Message[]; 
+     tail: Message[];
+   }>
+ ) {
+   const conv = state.conversations.find(c => c.id === action.payload.conversationId);
+   if (!conv) return;
+   conv.messages = [...action.payload.head, ...action.payload.tail];
+ },
     deleteConversation: (state, action: PayloadAction<string>) => {
       state.conversations = state.conversations.filter(conv => conv.id !== action.payload);
       if (state.activeConversationId === action.payload) {
@@ -400,7 +528,6 @@ const chatSlice = createSlice({
         conversation.updatedAt = new Date().toISOString();
       }
     },
-    // NEW: Toggle edit mode for a message
     toggleMessageEdit: (state, action: PayloadAction<string>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
       if (conversation) {
@@ -410,8 +537,7 @@ const chatSlice = createSlice({
         }
       }
     },
-    // NEW: Update message text and remove all subsequent messages
-   updateMessageAndTruncate: (
+    updateMessageAndTruncate: (
       state,
       action: PayloadAction<{ messageId: string; newText: string; files?: FileData[] }>
     ) => {
@@ -427,26 +553,20 @@ const chatSlice = createSlice({
 
       const msg = conversation.messages[idx];
 
-      // ─── Maintain an edit‐history array on the user message ───
       if (!msg.edits) {
-        // first time editing → seed with original text
         msg.edits = [msg.text];
       }
-      // push the newly saved text
+
       msg.edits.push(action.payload.newText);
       msg.currentEditIndex = msg.edits.length - 1;
-
-      // ─── Now overwrite the message with the new text ───
       msg.text = action.payload.newText;
       msg.files = action.payload.files || [];
       msg.isEditing = false;
       msg.timestamp = new Date().toISOString();
 
-      // ─── truncate any messages that came *after* this one ───
       conversation.messages = conversation.messages.slice(0, idx + 1);
       conversation.updatedAt = new Date().toISOString();
     },
-        // NAVIGATE THROUGH USER EDIT VERSIONS
     navigateUserEditVersion: (
       state,
       action: PayloadAction<{ messageId: string; direction: 'prev' | 'next' }>
@@ -471,8 +591,6 @@ const chatSlice = createSlice({
       msg.text = msg.edits[nextIndex];
       conversation.updatedAt = new Date().toISOString();
     },
-
-    // NEW: Navigate between response versions
     navigateResponseVersion: (state, action: PayloadAction<{ messageId: string; direction: 'prev' | 'next' }>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
       if (conversation) {
@@ -480,20 +598,19 @@ const chatSlice = createSlice({
         if (message && message.responses && message.responses.length > 1) {
           const currentIndex = message.currentResponseIndex || 0;
           let newIndex: number;
-          
+
           if (action.payload.direction === 'prev') {
             newIndex = Math.max(0, currentIndex - 1);
           } else {
             newIndex = Math.min(message.responses.length - 1, currentIndex + 1);
           }
-          
+
           message.currentResponseIndex = newIndex;
           message.text = message.responses[newIndex];
           conversation.updatedAt = new Date().toISOString();
         }
       }
     },
-    // NEW: Add new response version to a message
     addResponseVersion: (state, action: PayloadAction<{ messageId: string; newResponse: string }>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
       if (conversation) {
@@ -502,58 +619,146 @@ const chatSlice = createSlice({
           if (!message.responses) {
             message.responses = [message.text];
           }
+
           message.responses.push(action.payload.newResponse);
           message.currentResponseIndex = message.responses.length - 1;
           message.text = action.payload.newResponse;
           conversation.updatedAt = new Date().toISOString();
         }
       }
-    }
+    },
   },
-  extraReducers: (builder) => {
-    builder
-      .addCase(sendChatMessageStream.pending, (state) => {
-        state.isLoading = true;
-        state.error = null;
-      })
-      .addCase(sendChatMessageStream.fulfilled, (state) => {
-        state.isLoading = false;
-        state.error = null;
-      })
-      .addCase(sendChatMessageStream.rejected, (state, action) => {
-        state.isLoading = false;
-        state.error = action.error.message || 'Something went wrong';
-        state.streamingMessageIndex = null;
-      })
-      // NEW: Handle regeneration states
-      .addCase(regenerateFromMessage.pending, (state) => {
-        state.isLoading = true;
-        state.error = null;
-      })
-      .addCase(regenerateFromMessage.fulfilled, (state) => {
-        state.isLoading = false;
-        state.error = null;
-      })
-      .addCase(regenerateFromMessage.rejected, (state, action) => {
-        state.isLoading = false;
-        state.error = action.error.message || 'Regeneration failed';
-        state.streamingMessageIndex = null;
-      })
-      // NEW: Handle regenerateResponse states
-      .addCase(regenerateResponse.pending, (state) => {
-        state.isLoading = true;
-        state.error = null;
-      })
-      .addCase(regenerateResponse.fulfilled, (state) => {
-        state.isLoading = false;
-        state.error = null;
-      })
-      .addCase(regenerateResponse.rejected, (state, action) => {
-        state.isLoading = false;
-        state.error = action.error.message || 'Response regeneration failed';
-        state.streamingMessageIndex = null;
-      });
-  },
+extraReducers: (builder) => {
+  builder
+    // Fetch models reducers
+    .addCase(fetchAvailableModels.pending, (state) => {
+      state.modelsLoading = true;
+      state.modelsError = null;
+    })
+    .addCase(fetchAvailableModels.fulfilled, (state, action) => {
+      state.modelsLoading = false;
+      state.availableModels = action.payload;
+      state.modelsError = null;
+      if (!action.payload.find(model => model.name === state.selectedModel)) {
+        state.selectedModel = action.payload[0]?.name || 'mistral-large';
+      }
+    })
+    .addCase(fetchAvailableModels.rejected, (state, action) => {
+      state.modelsLoading = false;
+      state.modelsError = action.error.message || 'Failed to fetch models';
+    })
+
+    // Chat message reducers
+    .addCase(sendChatMessageStream.pending, (state) => {
+      state.isLoading = true;
+      state.error = null;
+    })
+    .addCase(sendChatMessageStream.fulfilled, (state) => {
+      state.isLoading = false;
+      state.error = null;
+    })
+    .addCase(sendChatMessageStream.rejected, (state, action) => {
+      state.isLoading = false;
+      state.error = action.error.message || 'Something went wrong';
+      state.streamingMessageIndex = null;
+    })
+
+    // ——— Regenerate-from-user thunk ———
+    .addCase(regenerateFromMessage.pending, (state, action) => {
+      state.isLoading = true;
+      state.error = null;
+
+      // 1) Find the conversation & user message
+      const conv = state.conversations.find(c => c.id === state.activeConversationId);
+      if (!conv) return;
+      const idx = conv.messages.findIndex(m => m.id === action.meta.arg.messageId);
+      if (idx < 0) return;
+
+      const userMsg = conv.messages[idx];
+
+      // 2) Capture the old tail (everything after this user message)
+      const oldTail = conv.messages.slice(idx + 1);
+
+      // 3) Initialize branches on first regen
+      if (!userMsg.branches) {
+        userMsg.branches = [];
+        userMsg.currentBranchIndex = 0;
+      }
+      // 4) Stash the original tail as branch #0 (only once)
+      if (userMsg.branches.length === 0) {
+        userMsg.branches.push(oldTail);
+      }
+
+      // 5) Truncate the conversation to just up through this user message
+      conv.messages = conv.messages.slice(0, idx + 1);
+    })
+    .addCase(regenerateFromMessage.fulfilled, (state, action) => {
+      state.isLoading = false;
+      state.error = null;
+
+      // 1) Locate the same user message
+      const conv = state.conversations.find(c => c.id === state.activeConversationId);
+      if (!conv) return;
+      const idx = conv.messages.findIndex(m => m.id === action.meta.arg.messageId);
+      if (idx < 0) return;
+
+      const userMsg = conv.messages[idx];
+
+      // 2) Capture the new tail (the freshly streamed bot messages)
+      const newTail = conv.messages.slice(idx + 1);
+
+      // 3) Add it as branch #1 (or next index) and switch to it
+      userMsg.branches!.push(newTail);
+      userMsg.currentBranchIndex = userMsg.branches!.length - 1;
+    })
+    .addCase(regenerateFromMessage.rejected, (state, action) => {
+      state.isLoading = false;
+      state.error = action.error.message || 'Regeneration failed';
+      state.streamingMessageIndex = null;
+    })
+
+    // Regenerate-response thunk (single‐message regen)  
+    .addCase(regenerateResponse.pending, (state) => {
+      state.isLoading = true;
+      state.error = null;
+    })
+    .addCase(regenerateResponse.fulfilled, (state) => {
+      state.isLoading = false;
+      state.error = null;
+    })
+    .addCase(regenerateResponse.rejected, (state, action) => {
+      state.isLoading = false;
+      state.error = action.error.message || 'Response regeneration failed';
+      state.streamingMessageIndex = null;
+    })
+    .addCase(webSearch.pending, (state) => {
+      state.searchLoading = true;
+      state.searchError = null;
+    })
+    .addCase(webSearch.fulfilled, (state, { payload }) => {
+      state.searchLoading = false;
+      state.searchResults = payload;
+    })
+    .addCase(webSearch.rejected, (state, { payload, error }) => {
+      state.searchLoading = false;
+      state.searchError = payload ?? error.message ?? 'Search failed';
+    })
+
+    // Image-generation tool cases
+    .addCase(generateImage.pending, (state) => {
+      state.imageLoading = true;
+      state.imageError = null;
+    })
+    .addCase(generateImage.fulfilled, (state, { payload }) => {
+      state.imageLoading = false;
+      state.generatedImageUrl = payload;
+    })
+    .addCase(generateImage.rejected, (state, { payload, error }) => {
+      state.imageLoading = false;
+      state.imageError = payload ?? error.message ?? 'Image generation failed';
+    });
+},
+
 });
 
 export const {
@@ -566,12 +771,13 @@ export const {
   addBotMessage,
   appendToLastBotMessage,
   finishStreaming,
-  toggleMessageEdit, // NEW
-  updateMessageAndTruncate, // NEW
-  navigateResponseVersion, // NEW
-  addResponseVersion, // NEW
-  navigateUserEditVersion,      // NEW
-
+  toggleMessageEdit,
+  updateMessageAndTruncate,
+  navigateResponseVersion,
+  addResponseVersion,
+  navigateUserEditVersion,
+  replaceConversationTail,
+  setUserBranchIndex,
 } = chatSlice.actions;
 
 export default chatSlice.reducer;

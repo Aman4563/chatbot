@@ -19,9 +19,13 @@ import {
   FileData,
   Message,
 navigateUserEditVersion,    // new
-
+fetchAvailableModels,
+  setUserBranchIndex,
+  replaceConversationTail,
+webSearch, generateImage,
+addBotMessage
 } from '../chatSlice';
-import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X } from 'lucide-react';
+import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X, Eye } from 'lucide-react';
 import { AppDispatch } from '@/store';
 import { RootState } from '@reduxjs/toolkit/query';
 
@@ -44,9 +48,23 @@ function rehypeStripHljs() {                       // ← ADD THIS
 
 const Chat = () => {
   const dispatch = useDispatch<AppDispatch>();
-  const { conversations, activeConversationId, input, isLoading, error, selectedModel } = useSelector(
-    (state: RootState) => state.chat
-  );
+  const {
+  conversations,
+  activeConversationId,
+  input,
+  isLoading,
+  error,
+  selectedModel,
+  availableModels,      // ← pull this in
+  searchResults,
+  searchLoading,
+  searchError,
+  generatedImageUrl,
+  imageLoading,
+  imageError,
+
+} = useSelector((state: RootState) => state.chat);
+
   
   const [selectedFiles, setSelectedFiles] = useState<FileData[]>([]);
   const [dragOver, setDragOver] = useState(false);
@@ -59,13 +77,104 @@ const Chat = () => {
 
   const activeConversation = conversations.find(conv => conv.id === activeConversationId);
 
+// 3️⃣ Add two handlers, just above your return:
+const handleSearch = async () => {
+  if (!input.trim()) return;
+  try {
+    await dispatch(webSearch({ query: input })).unwrap();
+  } catch (e) {
+    console.error('Search failed:', e);
+  }
+};
+
+// const handleGenerateImage = async () => {
+//   if (!input.trim()) return;
+//   try {
+//     // 1) Ask the backend for an image URL
+//     const url = await dispatch(generateImage({ prompt: input })).unwrap();
+
+//     // 2) Inject that URL back into the conversation as a markdown image
+//     dispatch(addBotMessage(`![Generated Image](${url})`));
+
+//     // 3) Clear out the input (optional)
+//     dispatch(setInput(''));
+//   } catch (e) {
+//     console.error('Image gen failed:', e);
+//   }
+// };
+
+
+const handleGenerateImage = async () => {
+  if (!input.trim() || !activeConversationId) return; 
+  try { 
+    // 1) call your backend to generate & return a data-URL 
+    const url: string = await dispatch(generateImage({ prompt: input })).unwrap(); 
+ 
+    // 2) push a completed Bot message into the conversation 
+    dispatch(addMessage({ 
+      conversationId: activeConversationId, 
+      message: { 
+        id: Date.now().toString(),             // unique ID 
+        sender: 'Bot', 
+        text: `![Generated Image](${url})`,    // markdown for ReactMarkdown to render <img> 
+        timestamp: new Date().toISOString(), 
+      } 
+    })); 
+ 
+    // 3) clear the input box 
+    dispatch(setInput('')); 
+  } catch (e) { 
+    console.error('Image gen failed:', e); 
+  } 
+};
+
+
     // NEW handler for user‐edit navigation
-  const handleNavigateUserEdit = (
-    messageId: string,
-    direction: 'prev' | 'next'
-  ) => {
-    dispatch(navigateUserEditVersion({ messageId, direction }));
-  };
+// AFTER
+const handleNavigateUserEdit = (
+  messageId: string,
+  direction: 'prev' | 'next'
+) => {
+  const conv = conversations.find(c => c.id === activeConversationId);
+  if (!conv) return;
+
+  // 1) Locate the user message in the current conversation
+  const idx = conv.messages.findIndex(m => m.id === messageId && m.sender === 'User');
+  if (idx < 0) return;
+  const userMsg = conv.messages[idx];
+
+  // 2) Compute the new edit index and text yourself
+  const oldEditIndex = userMsg.currentEditIndex ?? 0;
+  let newEditIndex = direction === 'prev' ? oldEditIndex - 1 : oldEditIndex + 1;
+  // clamp to valid range
+  newEditIndex = Math.max(0, Math.min((userMsg.edits?.length ?? 1) - 1, newEditIndex));
+  const newText = userMsg.edits![newEditIndex];
+
+  // 3) Update the slice’s edit version (so UI shows the correct counter & text)
+  dispatch(navigateUserEditVersion({ messageId, direction }));
+
+  // 4) Step the branch index (0 = original tail, 1 = first regen, 2 = second regen…)
+  const oldBranch = userMsg.currentBranchIndex ?? 0;
+  let newBranch = direction === 'prev' ? oldBranch - 1 : oldBranch + 1;
+  newBranch = Math.max(0, Math.min((userMsg.branches?.length ?? 1) - 1, newBranch));
+  dispatch(setUserBranchIndex({ messageId, branchIndex: newBranch }));
+
+  // 5) Rebuild the conversation:
+  //    – head = all messages up to this user message, but with the updated text
+  //    – tail = the branch you just selected
+  const head = [
+    ...conv.messages.slice(0, idx),
+    { ...userMsg, text: newText }
+  ];
+  const tail = userMsg.branches ? userMsg.branches[newBranch] : [];
+  dispatch(replaceConversationTail({
+    conversationId: activeConversationId!,
+    head,
+    tail
+  }));
+};
+
+
   // ✅ CORRECTED LOCATION - Handler functions in main component scope
   const handleNavigateResponse = (messageId: string, direction: 'prev' | 'next') => {
     dispatch(navigateResponseVersion({ messageId, direction }));
@@ -446,22 +555,100 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
 
   // Single Consistent Typing Indicator Component
   const TypingIndicator = () => (
-    <div className="flex items-center gap-3 px-5 py-4">
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600">
-        <Bot className="w-5 h-5 text-white" />
-      </div>
-      <div className="bg-white/90 text-gray-800 border border-gray-200/50 rounded-2xl rounded-tl-lg px-5 py-3 shadow-lg backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-600 font-medium">Xbot is thinking</span>
-          <div className="flex gap-1">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1.4s' }}></div>
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1.4s' }}></div>
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1.4s' }}></div>
-          </div>
+    // Add this to the top of your Chat.tsx file, updating the header section
+
+// In the header section of Chat.tsx, update this part:
+<div className="bg-gradient-to-r from-slate-50 to-blue-50 border-b border-slate-200 px-6 py-4">
+  <div className="flex items-center justify-between">
+    <div className="flex items-center space-x-4">
+      <div className="flex items-center space-x-3">
+        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+          <Bot className="w-6 h-6 text-white" />
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">AI Assistant</h1>
+          {selectedModel && (
+            <div className="flex items-center space-x-2 mt-1">
+              <span className="text-sm text-slate-600">
+                {/* {fetchAvailableModels.find(m => m.name === selectedModel)?.display_name || selectedModel} */}
+                {availableModels.find(m => m.name === selectedModel)?.display_name || selectedModel}
+
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                (() => {
+                  const model = availableModels.find(m => m.name === selectedModel);
+                  switch (model?.provider) {
+                    case 'mistral': return 'bg-orange-100 text-orange-700';
+                    case 'openai': return 'bg-green-100 text-green-700';
+                    case 'anthropic': return 'bg-purple-100 text-purple-700';
+                    case 'google': return 'bg-blue-100 text-blue-700';
+                    default: return 'bg-gray-100 text-gray-700';
+                  }
+                })()
+              }`}>
+                {availableModels.find(m => m.name === selectedModel)?.provider || 'unknown'}
+              </span>
+              {availableModels.find(m => m.name === selectedModel)?.supports_vision && (
+                <Eye className="w-4 h-4 text-blue-500" title="Vision capable" />
+              )}
+              {availableModels.find(m => m.name === selectedModel)?.supports_files && (
+                <FileText className="w-4 h-4 text-green-500" title="Document analysis" />
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
+  </div>
+</div>
+
   );
+// Jump to the previous continuation branch
+const handlePreviousBranch = (messageId: string) => {
+  const conv = conversations.find(c => c.id === activeConversationId);
+  if (!conv) return;
+  const idx = conv.messages.findIndex(m => m.id === messageId && m.sender === 'User');
+  if (idx < 0) return;
+  const userMsg = conv.messages[idx];
+  const current = userMsg.currentBranchIndex ?? 0;
+  if (current <= 0) return;                  // already at first branch
+  
+  const newBranch = current - 1;
+  dispatch(setUserBranchIndex({ messageId, branchIndex: newBranch }));
+  
+  // head = everything up to & including this user message
+  const head = conv.messages.slice(0, idx + 1);
+  // tail = the chosen branch
+  const tail = userMsg.branches![newBranch];
+  dispatch(replaceConversationTail({
+    conversationId: activeConversationId!,
+    head,
+    tail
+  }));
+};
+
+// Jump to the next continuation branch
+const handleNextBranch = (messageId: string) => {
+  const conv = conversations.find(c => c.id === activeConversationId);
+  if (!conv) return;
+  const idx = conv.messages.findIndex(m => m.id === messageId && m.sender === 'User');
+  if (idx < 0) return;
+  const userMsg = conv.messages[idx];
+  const branchCount = userMsg.branches?.length ?? 0;
+  const current = userMsg.currentBranchIndex ?? 0;
+  if (current >= branchCount - 1) return;   // already at last branch
+  
+  const newBranch = current + 1;
+  dispatch(setUserBranchIndex({ messageId, branchIndex: newBranch }));
+  
+  const head = conv.messages.slice(0, idx + 1);
+  const tail = userMsg.branches![newBranch];
+  dispatch(replaceConversationTail({
+    conversationId: activeConversationId!,
+    head,
+    tail
+  }));
+};
 
   if (!activeConversation) {
     return (
@@ -543,6 +730,42 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
       {/* Messages with custom scrollbar */}
       <div className="flex-1 overflow-y-auto bg-gradient-to-b from-gray-50 to-gray-100 custom-scrollbar">
         <div className="w-full mx-auto px-4 py-6">
+          {/* --- Tool Results --- */}
+{searchError && <div className="text-red-600">{searchError}</div>}
+
+{searchResults.length > 0 && (
+  <div className="mb-6 p-4 bg-white rounded-lg shadow">
+    <h4 className="font-semibold mb-2">Search Results:</h4>
+    <ul className="list-disc ml-5 space-y-1">
+      {searchResults.map((url, i) => (
+        <li key={i}>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:underline"
+          >
+            {url}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </div>
+)}
+
+{imageError && <div className="text-red-600">{imageError}</div>}
+
+{generatedImageUrl && (
+  <div className="mb-6 p-4 bg-white rounded-lg shadow">
+    <h4 className="font-semibold mb-2">Generated Image:</h4>
+    <img
+      src={generatedImageUrl}
+      alt="Generated"
+      className="max-w-full rounded"
+    />
+  </div>
+)}
+
           {activeConversation.messages.length === 0 && !isLoading && (
             <div className="text-center py-16">
               <div className="w-24 h-24 bg-gradient-to-br from-blue-100 via-purple-100 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-8 shadow-lg">
@@ -591,31 +814,34 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
           
           {/* NEW: User edit navigation arrows */}
-          {msg.sender === 'User' && msg.edits && msg.edits.length > 1 && !msg.isEditing && !isLoading && (
-            <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200 mr-1">
-              <button
-                onClick={() => handleNavigateUserEdit(msg.id, 'prev')}
-                disabled={(msg.currentEditIndex || 0) === 0}
-                className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Previous edit"
-              >
-                <ChevronLeft className="w-4 h-4 text-gray-600" />
-              </button>
-              
-              <span className="text-xs text-gray-500 px-2 font-medium">
-                {(msg.currentEditIndex || 0) + 1} / {msg.edits.length}
-              </span>
-              
-              <button
-                onClick={() => handleNavigateUserEdit(msg.id, 'next')}
-                disabled={(msg.currentEditIndex || 0) === msg.edits.length - 1}
-                className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Next edit"
-              >
-                <ChevronRight className="w-4 h-4 text-gray-600" />
-              </button>
-            </div>
-          )}
+         {msg.sender === 'User' && msg.branches && msg.branches.length > 1 && !msg.isEditing && !isLoading && (
+  <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200 mr-1">
+    {/* ◀︎ branch */}
+    <button
+      onClick={() => handleNavigateUserEdit(msg.id, 'prev')}
+      disabled={(msg.currentBranchIndex ?? 0) === 0}
+      className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title="Previous branch"
+    >
+      <ChevronLeft className="w-4 h-4 text-gray-600" />
+    </button>
+
+    {/* branch counter */}
+    <span className="text-xs text-gray-500 px-2 font-medium">
+      {(msg.currentBranchIndex ?? 0) + 1} / {msg.branches.length}
+    </span>
+
+    {/* ▶︎ branch */}
+    <button
+      onClick={() => handleNavigateUserEdit(msg.id, 'next')}
+      disabled={(msg.currentBranchIndex ?? 0) === msg.branches.length - 1}
+      className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title="Next branch"
+    >
+      <ChevronRight className="w-4 h-4 text-gray-600" />
+    </button> 
+  </div>
+)}
 
           {/* Bot message navigation and regenerate buttons */}
           {msg.sender === 'Bot' && !msg.isStreaming && !isLoading && (
@@ -825,26 +1051,35 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
         )}
 
         {/* NEW: User edit version indicator at bottom for user messages */}
-        {msg.sender === 'User' && msg.edits && msg.edits.length > 1 && (
-          <div className="mt-3 pt-2 border-t border-blue-300/30 flex items-center justify-between text-xs text-white/70">
-            <span>Edit {(msg.currentEditIndex || 0) + 1} of {msg.edits.length}</span>
-            <div className="flex items-center gap-1">
-              <Edit3 className="w-3 h-3" />
-              <span>Multiple edits available</span>
-            </div>
-          </div>
-        )}
+    {msg.sender === 'User' && msg.branches && msg.branches.length > 1 && !msg.isEditing && !isLoading && (
+  <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200 mr-1">
+    {/* Previous branch */}
+    <button
+      onClick={() => handlePreviousBranch(msg.id)}
+      disabled={(msg.currentBranchIndex ?? 0) === 0}
+      className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title="Previous branch"
+    >
+      <ChevronLeft className="w-4 h-4 text-gray-600" />
+    </button>
 
-        {/* Existing: Response version indicator at bottom for bot messages */}
-        {msg.sender === 'Bot' && msg.responses && msg.responses.length > 1 && (
-          <div className="mt-3 pt-2 border-t border-gray-200/50 flex items-center justify-between text-xs text-gray-500">
-            <span>Response {(msg.currentResponseIndex || 0) + 1} of {msg.responses.length}</span>
-            <div className="flex items-center gap-1">
-              <RotateCcw className="w-3 h-3" />
-              <span>Multiple responses available</span>
-            </div>
-          </div>
-        )}
+    {/* Branch counter */}
+    <span className="text-xs text-gray-500 px-2 font-medium">
+      {(msg.currentBranchIndex ?? 0) + 1} / {msg.branches.length}
+    </span>
+
+    {/* Next branch */}
+    <button
+      onClick={() => handleNextBranch(msg.id)}
+      disabled={(msg.currentBranchIndex ?? 0) === msg.branches.length - 1}
+      className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title="Next branch"
+    >
+      <ChevronRight className="w-4 h-4 text-gray-600" />
+    </button>
+  </div>
+)}
+
       </div>
     </div>
   </div>
@@ -942,17 +1177,34 @@ const EditableMessage = ({ msg, onSave, onCancel }: {
             
             {/* Send Button */}
             <div className="flex-shrink-0">
-              <button
-                onClick={handleSend}
-                disabled={isLoading || (!input.trim() && selectedFiles.length === 0)}
-                className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl transition-all duration-200 shadow-md hover:shadow-lg disabled:shadow-sm flex items-center justify-center border-0 transform hover:scale-105 disabled:transform-none"
-              >
-                {isLoading ? (
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
-                )}
-              </button>
+              <div className="flex-shrink-0 flex items-center space-x-2">
+  <button
+    onClick={handleSearch}
+    disabled={isLoading || searchLoading || !input.trim()}
+    className="px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded-lg transition"
+  >
+    {searchLoading ? 'Searching…' : 'Search'}
+  </button>
+  <button
+    onClick={handleGenerateImage}
+    disabled={isLoading || imageLoading || !input.trim()}
+    className="px-4 py-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg transition"
+  >
+    {imageLoading ? 'Generating…' : 'Image'}
+  </button>
+  <button
+    onClick={handleSend}
+    disabled={isLoading || (!input.trim() && selectedFiles.length === 0)}
+    className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl transition"
+  >
+    {isLoading ? (
+      <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+    ) : (
+      <Send className="w-5 h-5" />
+    )}
+  </button>
+</div>
+
             </div>
           </div>
           
