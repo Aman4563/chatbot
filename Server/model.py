@@ -150,7 +150,7 @@ def web_search_tool(query: str, num_results: int = 5) -> List[str]:
         
 #         from google import genai
 #         # instantiate the Imagen model for image gen
-#         client = genai.Client(api_key="AIzaSyByXSr71jS3gk4WejSp2pzcAroM_jf4jP8")
+#         client = genai.Client(api_key=google_key)
 
 #         result = client.models.generate_images(
 #         model="models/imagen-3.0-generate-002",
