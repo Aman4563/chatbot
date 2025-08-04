@@ -1,9 +1,8 @@
-// chatSlice.ts
+// chatSlice.ts - Complete updated version with all fixes
 
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-
 
 export type FileData = {
   data: string;
@@ -24,11 +23,8 @@ export type Message = {
   currentResponseIndex?: number;
   edits?: string[];
   currentEditIndex?: number;
-  
- // —— add these two —— 
- branches?: Message[][];
- currentBranchIndex?: number;
-
+  branches?: Message[][];
+  currentBranchIndex?: number;
 };
 
 export type Conversation = {
@@ -40,7 +36,6 @@ export type Conversation = {
   updatedAt: string;
 };
 
-// NEW: Model info interface matching backend
 export type ModelInfo = {
   name: string;
   display_name: string;
@@ -58,18 +53,21 @@ interface ChatState {
   error: string | null;
   streamingMessageIndex: number | null;
   selectedModel: string;
-  availableModels: ModelInfo[]; // Changed from string[] to ModelInfo[]
+  availableModels: ModelInfo[];
   modelsLoading: boolean;
   modelsError: string | null;
-    searchResults: string[];
+  searchResults: string[];
   searchLoading: boolean;
   searchError: string | null;
   generatedImageUrl: string | null;
   imageLoading: boolean;
   imageError: string | null;
+  // Enhanced image handling fields
+  imageHistory: Array<{ prompt: string; url: string; timestamp: string }>;
+  currentImageIndex: number | null;
+  // Tool state management
+  activeTool: 'chat' | 'search' | 'image';
 }
-
-
 
 const initialState: ChatState = {
   conversations: [],
@@ -78,21 +76,23 @@ const initialState: ChatState = {
   isLoading: false,
   error: null,
   streamingMessageIndex: null,
-  selectedModel: 'mistral-large', // Changed default to Mistral
+  selectedModel: 'mistral-large',
   availableModels: [],
   modelsLoading: false,
   modelsError: null,
-    searchResults: [],
+  searchResults: [],
   searchLoading: false,
   searchError: null,
   generatedImageUrl: null,
   imageLoading: false,
   imageError: null,
+  imageHistory: [],
+  currentImageIndex: null,
+  activeTool: 'chat',
 };
 
 const generateId = () => Date.now().toString() + Math.random().toString(36).substr(2, 9);
 
-// Convert messages to history format for API
 const formatHistoryForAPI = (messages: Message[]) => {
   return messages.map(msg => ({
     role: msg.sender === 'User' ? 'user' : 'assistant',
@@ -101,66 +101,102 @@ const formatHistoryForAPI = (messages: Message[]) => {
   }));
 };
 
-
-// 2️⃣ Define your new tool-calling thunks
+// Enhanced web search thunk with better error handling
 export const webSearch = createAsyncThunk<
-  string[],                             // returned payload: array of URLs
-  { query: string; num_results?: number }, // thunk arg
+  string[],
+  { query: string; num_results?: number },
   { rejectValue: string }
 >(
   'chat/webSearch',
   async ({ query, num_results = 5 }, { rejectWithValue }) => {
     try {
+      console.log('Starting web search for:', query);
+      
       const res = await fetch(
-  `${API_BASE}/tools/search?q=${encodeURIComponent(query)}&num_results=${num_results}`
-);
+        `${API_BASE}/tools/search?q=${encodeURIComponent(query)}&num_results=${num_results}`
+      );
+      
       if (!res.ok) {
         const text = await res.text();
+        console.error('Search API error:', text);
         return rejectWithValue(text || 'Search failed');
       }
-      const json = (await res.json()) as { query: string; results: string[] };
+      
+      const json = await res.json();
+      console.log('Search results:', json);
       return json.results;
     } catch (err: any) {
+      console.error('Search network error:', err);
       return rejectWithValue(err.message ?? 'Network error');
     }
   }
 );
 
+// Enhanced image generation thunk with better debugging and integration
 export const generateImage = createAsyncThunk<
-  string,                   // returned payload: image URL
-  { prompt: string },       // thunk arg
+  string,
+  { prompt: string },
   { rejectValue: string }
 >(
   'chat/generateImage',
   async ({ prompt }, { rejectWithValue }) => {
     try {
-      const res = await fetch(
-  `${API_BASE}/tools/image`,
-  {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  }
-);
+      console.log('🖼️ Starting image generation for prompt:', prompt);
+      
+      const res = await fetch(`${API_BASE}/tools/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+
+      console.log('🔄 Image generation response status:', res.status);
 
       if (!res.ok) {
         const text = await res.text();
+        console.error('❌ Image generation API error:', res.status, text);
         return rejectWithValue(text || 'Image generation failed');
       }
-      const json = (await res.json()) as { prompt: string; url: string };
-      return json.url;
+      
+      const json = await res.json();
+      console.log('📊 Raw backend response:', json);
+      
+      // ✅ ENHANCED VALIDATION
+      if (!json || typeof json !== 'object') {
+        console.error('❌ Invalid JSON response:', json);
+        return rejectWithValue('Invalid response format');
+      }
+
+      if (!json.url) {
+        console.error('❌ No URL in response:', json);
+        return rejectWithValue('No image URL received from backend');
+      }
+
+      if (typeof json.url !== 'string') {
+        console.error('❌ URL is not a string:', typeof json.url, json.url);
+        return rejectWithValue('Invalid URL type received');
+      }
+
+      const trimmedUrl = json.url.trim();
+      if (trimmedUrl === '' || trimmedUrl === 'undefined' || trimmedUrl === 'null') {
+        console.error('❌ Empty or invalid URL:', json.url);
+        return rejectWithValue('Empty or invalid URL received');
+      }
+
+      console.log('✅ Valid URL received:', trimmedUrl.substring(0, 100));
+      return trimmedUrl;
+      
     } catch (err: any) {
+      console.error('🚨 Image generation network error:', err);
       return rejectWithValue(err.message ?? 'Network error');
     }
   }
 );
 
 
-// NEW: Fetch available models from backend
 export const fetchAvailableModels = createAsyncThunk(
   'chat/fetchAvailableModels',
   async () => {
-    const response = await fetch('http://localhost:8000/models');
+    const response = await fetch(`${API_BASE}/models`);
     if (!response.ok) {
       throw new Error('Failed to fetch models');
     }
@@ -179,14 +215,12 @@ export const sendChatMessageStream = createAsyncThunk(
       throw new Error('No active conversation');
     }
 
-    // Get current conversation for context
     const currentConversation = conversations.find(conv => conv.id === activeConversationId);
     const history = currentConversation ? formatHistoryForAPI(currentConversation.messages) : [];
 
-    console.log('Sending with history:', history);
-    console.log('Using model:', selectedModel);
+    console.log('Sending chat message:', { message, files, selectedModel, history });
 
-    const response = await fetch('http://localhost:8000/chat', {
+    const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -264,14 +298,12 @@ export const regenerateFromMessage = createAsyncThunk(
       throw new Error('Message not found');
     }
 
-    // Get history up to (but not including) the edited message
     const historyMessages = currentConversation.messages.slice(0, messageIndex);
     const history = formatHistoryForAPI(historyMessages);
 
-    // Update the message and remove all subsequent messages
     dispatch(updateMessageAndTruncate({ messageId, newText, files }));
 
-    const response = await fetch('http://localhost:8000/chat', {
+    const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -349,17 +381,15 @@ export const regenerateResponse = createAsyncThunk(
       throw new Error('Message not found');
     }
 
-    // Get the user message that prompted this bot response
     const userMessage = messageIndex > 0 ? currentConversation.messages[messageIndex - 1] : null;
     if (!userMessage || userMessage.sender !== 'User') {
       throw new Error('No user message found to regenerate from');
     }
 
-    // Get history up to the user message
     const historyMessages = currentConversation.messages.slice(0, messageIndex - 1);
     const history = formatHistoryForAPI(historyMessages);
 
-    const response = await fetch('http://localhost:8000/chat', {
+    const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -379,7 +409,6 @@ export const regenerateResponse = createAsyncThunk(
       throw new Error('Failed to regenerate response');
     }
 
-    // Handle streaming response and add to responses array
     let newResponseText = '';
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
@@ -426,12 +455,23 @@ const chatSlice = createSlice({
     },
     setSelectedModel: (state, action: PayloadAction<string>) => {
       state.selectedModel = action.payload;
-      // Update active conversation model
       if (state.activeConversationId) {
         const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
         if (conversation) {
           conversation.model = action.payload;
         }
+      }
+    },
+    setActiveTool: (state, action: PayloadAction<'chat' | 'search' | 'image'>) => {
+      state.activeTool = action.payload;
+      // Clear tool-specific state when switching tools
+      if (action.payload !== 'search') {
+        state.searchResults = [];
+        state.searchError = null;
+      }
+      if (action.payload !== 'image') {
+        state.generatedImageUrl = null;
+        state.imageError = null;
       }
     },
     createNewConversation: (state) => {
@@ -445,43 +485,50 @@ const chatSlice = createSlice({
       };
       state.conversations.unshift(newConversation);
       state.activeConversationId = newConversation.id;
+      // Clear tool states when starting new conversation
+      state.generatedImageUrl = null;
+      state.imageError = null;
+      state.searchResults = [];
+      state.searchError = null;
+      state.activeTool = 'chat';
     },
     switchConversation: (state, action: PayloadAction<string>) => {
       state.activeConversationId = action.payload;
       state.streamingMessageIndex = null;
-      // Update selected model based on conversation
       const conversation = state.conversations.find(conv => conv.id === action.payload);
       if (conversation) {
         state.selectedModel = conversation.model;
       }
+      // Clear tool states when switching conversations
+      state.generatedImageUrl = null;
+      state.imageError = null;
+      state.searchResults = [];
+      state.searchError = null;
+      state.activeTool = 'chat';
     },
-      // inside your createSlice({ reducers: { … }})
-
-// switch which branch of continuation to show 
-setUserBranchIndex( 
-   state, 
-   action: PayloadAction<{ messageId: string; branchIndex: number }>
- ) {
-   const conv = state.conversations.find(c => c.id === state.activeConversationId);
-   if (!conv) return; 
-   const msg = conv.messages.find(m => m.id === action.payload.messageId);
-   if (!msg || !msg.branches) return;
-   msg.currentBranchIndex = action.payload.branchIndex; 
- },
-
- // rebuild the conversation tail from head + that branch
- replaceConversationTail(
-   state,
-   action: PayloadAction<{
-     conversationId: string;
-     head: Message[]; 
-     tail: Message[];
-   }>
- ) {
-   const conv = state.conversations.find(c => c.id === action.payload.conversationId);
-   if (!conv) return;
-   conv.messages = [...action.payload.head, ...action.payload.tail];
- },
+    setUserBranchIndex: (
+      state,
+      action: PayloadAction<{ messageId: string; branchIndex: number }>
+    ) => {
+      const conv = state.conversations.find(c => c.id === state.activeConversationId);
+      if (!conv) return;
+      const msg = conv.messages.find(m => m.id === action.payload.messageId);
+      if (!msg || !msg.branches) return;
+      msg.currentBranchIndex = action.payload.branchIndex;
+    },
+    replaceConversationTail: (
+      state,
+      action: PayloadAction<{
+        conversationId: string;
+        head: Message[];
+        tail: Message[];
+      }>
+    ) => {
+      const conv = state.conversations.find(c => c.id === action.payload.conversationId);
+      if (!conv) return;
+      conv.messages = [...action.payload.head, ...action.payload.tail];
+      conv.updatedAt = new Date().toISOString();
+    },
     deleteConversation: (state, action: PayloadAction<string>) => {
       state.conversations = state.conversations.filter(conv => conv.id !== action.payload);
       if (state.activeConversationId === action.payload) {
@@ -498,6 +545,36 @@ setUserBranchIndex(
         }
       }
     },
+    // ✅ CRITICAL FIX: Enhanced message updating with proper text handling
+    updateMessageText: (state, action: PayloadAction<{ 
+  conversationId: string; 
+  messageId: string; 
+  newText: string 
+}>) => {
+  console.log('🔄 updateMessageText called:', {
+    conversationId: action.payload.conversationId,
+    messageId: action.payload.messageId,
+    newTextLength: action.payload.newText?.length,
+    newTextPreview: action.payload.newText?.substring(0, 200),
+    containsImage: action.payload.newText?.includes('![')
+  });
+  
+  const conversation = state.conversations.find(conv => conv.id === action.payload.conversationId);
+  if (conversation) {
+    const message = conversation.messages.find(msg => msg.id === action.payload.messageId);
+    if (message) {
+      console.log('✅ Message found, updating text');
+      message.text = action.payload.newText;
+      message.isStreaming = false;
+      conversation.updatedAt = new Date().toISOString();
+    } else {
+      console.error('❌ Message not found:', action.payload.messageId);
+    }
+  } else {
+    console.error('❌ Conversation not found:', action.payload.conversationId);
+  }
+},
+
     addBotMessage: (state, action: PayloadAction<string>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
       if (conversation) {
@@ -627,147 +704,177 @@ setUserBranchIndex(
         }
       }
     },
-  },
-extraReducers: (builder) => {
-  builder
-    // Fetch models reducers
-    .addCase(fetchAvailableModels.pending, (state) => {
-      state.modelsLoading = true;
-      state.modelsError = null;
-    })
-    .addCase(fetchAvailableModels.fulfilled, (state, action) => {
-      state.modelsLoading = false;
-      state.availableModels = action.payload;
-      state.modelsError = null;
-      if (!action.payload.find(model => model.name === state.selectedModel)) {
-        state.selectedModel = action.payload[0]?.name || 'mistral-large';
-      }
-    })
-    .addCase(fetchAvailableModels.rejected, (state, action) => {
-      state.modelsLoading = false;
-      state.modelsError = action.error.message || 'Failed to fetch models';
-    })
-
-    // Chat message reducers
-    .addCase(sendChatMessageStream.pending, (state) => {
-      state.isLoading = true;
-      state.error = null;
-    })
-    .addCase(sendChatMessageStream.fulfilled, (state) => {
-      state.isLoading = false;
-      state.error = null;
-    })
-    .addCase(sendChatMessageStream.rejected, (state, action) => {
-      state.isLoading = false;
-      state.error = action.error.message || 'Something went wrong';
-      state.streamingMessageIndex = null;
-    })
-
-    // ——— Regenerate-from-user thunk ———
-    .addCase(regenerateFromMessage.pending, (state, action) => {
-      state.isLoading = true;
-      state.error = null;
-
-      // 1) Find the conversation & user message
-      const conv = state.conversations.find(c => c.id === state.activeConversationId);
-      if (!conv) return;
-      const idx = conv.messages.findIndex(m => m.id === action.meta.arg.messageId);
-      if (idx < 0) return;
-
-      const userMsg = conv.messages[idx];
-
-      // 2) Capture the old tail (everything after this user message)
-      const oldTail = conv.messages.slice(idx + 1);
-
-      // 3) Initialize branches on first regen
-      if (!userMsg.branches) {
-        userMsg.branches = [];
-        userMsg.currentBranchIndex = 0;
-      }
-      // 4) Stash the original tail as branch #0 (only once)
-      if (userMsg.branches.length === 0) {
-        userMsg.branches.push(oldTail);
-      }
-
-      // 5) Truncate the conversation to just up through this user message
-      conv.messages = conv.messages.slice(0, idx + 1);
-    })
-    .addCase(regenerateFromMessage.fulfilled, (state, action) => {
-      state.isLoading = false;
-      state.error = null;
-
-      // 1) Locate the same user message
-      const conv = state.conversations.find(c => c.id === state.activeConversationId);
-      if (!conv) return;
-      const idx = conv.messages.findIndex(m => m.id === action.meta.arg.messageId);
-      if (idx < 0) return;
-
-      const userMsg = conv.messages[idx];
-
-      // 2) Capture the new tail (the freshly streamed bot messages)
-      const newTail = conv.messages.slice(idx + 1);
-
-      // 3) Add it as branch #1 (or next index) and switch to it
-      userMsg.branches!.push(newTail);
-      userMsg.currentBranchIndex = userMsg.branches!.length - 1;
-    })
-    .addCase(regenerateFromMessage.rejected, (state, action) => {
-      state.isLoading = false;
-      state.error = action.error.message || 'Regeneration failed';
-      state.streamingMessageIndex = null;
-    })
-
-    // Regenerate-response thunk (single‐message regen)  
-    .addCase(regenerateResponse.pending, (state) => {
-      state.isLoading = true;
-      state.error = null;
-    })
-    .addCase(regenerateResponse.fulfilled, (state) => {
-      state.isLoading = false;
-      state.error = null;
-    })
-    .addCase(regenerateResponse.rejected, (state, action) => {
-      state.isLoading = false;
-      state.error = action.error.message || 'Response regeneration failed';
-      state.streamingMessageIndex = null;
-    })
-    .addCase(webSearch.pending, (state) => {
-      state.searchLoading = true;
-      state.searchError = null;
-    })
-    .addCase(webSearch.fulfilled, (state, { payload }) => {
-      state.searchLoading = false;
-      state.searchResults = payload;
-    })
-    .addCase(webSearch.rejected, (state, { payload, error }) => {
-      state.searchLoading = false;
-      state.searchError = payload ?? error.message ?? 'Search failed';
-    })
-
-    // Image-generation tool cases
-    .addCase(generateImage.pending, (state) => {
-      state.imageLoading = true;
+    // Enhanced image handling reducers
+    clearGeneratedImage: (state) => {
+      state.generatedImageUrl = null;
       state.imageError = null;
-    })
-    .addCase(generateImage.fulfilled, (state, { payload }) => {
-      state.imageLoading = false;
-      state.generatedImageUrl = payload;
-    })
-    .addCase(generateImage.rejected, (state, { payload, error }) => {
-      state.imageLoading = false;
-      state.imageError = payload ?? error.message ?? 'Image generation failed';
-    });
-},
+    },
+    addToImageHistory: (state, action: PayloadAction<{ prompt: string; url: string }>) => {
+      state.imageHistory.push({
+        prompt: action.payload.prompt,
+        url: action.payload.url,
+        timestamp: new Date().toISOString()
+      });
+      state.currentImageIndex = state.imageHistory.length - 1;
+    },
+    // Clear all tool states
+    clearToolStates: (state) => {
+      state.searchResults = [];
+      state.searchError = null;
+      state.generatedImageUrl = null;
+      state.imageError = null;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      // Fetch models reducers
+      .addCase(fetchAvailableModels.pending, (state) => {
+        state.modelsLoading = true;
+        state.modelsError = null;
+      })
+      .addCase(fetchAvailableModels.fulfilled, (state, action) => {
+        state.modelsLoading = false;
+        state.availableModels = action.payload;
+        state.modelsError = null;
+        if (!action.payload.find(model => model.name === state.selectedModel)) {
+          state.selectedModel = action.payload[0]?.name || 'mistral-large';
+        }
+      })
+      .addCase(fetchAvailableModels.rejected, (state, action) => {
+        state.modelsLoading = false;
+        state.modelsError = action.error.message || 'Failed to fetch models';
+      })
 
+      // Chat message reducers
+      .addCase(sendChatMessageStream.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(sendChatMessageStream.fulfilled, (state) => {
+        state.isLoading = false;
+        state.error = null;
+      })
+      .addCase(sendChatMessageStream.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.error.message || 'Something went wrong';
+        state.streamingMessageIndex = null;
+      })
+
+      // Regenerate-from-user thunk with enhanced branching
+      .addCase(regenerateFromMessage.pending, (state, action) => {
+        state.isLoading = true;
+        state.error = null;
+
+        const conv = state.conversations.find(c => c.id === state.activeConversationId);
+        if (!conv) return;
+        const idx = conv.messages.findIndex(m => m.id === action.meta.arg.messageId);
+        if (idx < 0) return;
+
+        const userMsg = conv.messages[idx];
+        const oldTail = conv.messages.slice(idx + 1);
+
+        if (!userMsg.branches) {
+          userMsg.branches = [];
+          userMsg.currentBranchIndex = 0;
+        }
+        if (userMsg.branches.length === 0) {
+          userMsg.branches.push(oldTail);
+        }
+
+        conv.messages = conv.messages.slice(0, idx + 1);
+      })
+      .addCase(regenerateFromMessage.fulfilled, (state, action) => {
+        state.isLoading = false;
+        state.error = null;
+
+        const conv = state.conversations.find(c => c.id === state.activeConversationId);
+        if (!conv) return;
+        const idx = conv.messages.findIndex(m => m.id === action.meta.arg.messageId);
+        if (idx < 0) return;
+
+        const userMsg = conv.messages[idx];
+        const newTail = conv.messages.slice(idx + 1);
+
+        userMsg.branches!.push(newTail);
+        userMsg.currentBranchIndex = userMsg.branches!.length - 1;
+      })
+      .addCase(regenerateFromMessage.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.error.message || 'Regeneration failed';
+        state.streamingMessageIndex = null;
+      })
+
+      // Regenerate-response thunk
+      .addCase(regenerateResponse.pending, (state) => {
+        state.isLoading = true;
+        state.error = null;
+      })
+      .addCase(regenerateResponse.fulfilled, (state) => {
+        state.isLoading = false;
+        state.error = null;
+      })
+      .addCase(regenerateResponse.rejected, (state, action) => {
+        state.isLoading = false;
+        state.error = action.error.message || 'Response regeneration failed';
+        state.streamingMessageIndex = null;
+      })
+
+      // Enhanced web search reducers
+      .addCase(webSearch.pending, (state) => {
+        state.searchLoading = true;
+        state.searchError = null;
+        state.searchResults = [];
+      })
+      .addCase(webSearch.fulfilled, (state, { payload }) => {
+        state.searchLoading = false;
+        state.searchResults = payload;
+        state.searchError = null;
+      })
+      .addCase(webSearch.rejected, (state, { payload, error }) => {
+        state.searchLoading = false;
+        state.searchError = payload ?? error.message ?? 'Search failed';
+        state.searchResults = [];
+      })
+
+      // ✅ ENHANCED image generation reducers with proper state management
+      .addCase(generateImage.pending, (state, action) => {
+        console.log('🔄 Image generation pending for prompt:', action.meta.arg.prompt);
+        state.imageLoading = true;
+        state.imageError = null;
+        // DON'T clear generatedImageUrl here - let it stay until new image is ready
+      })
+      .addCase(generateImage.fulfilled, (state, { payload, meta }) => {
+        console.log('✅ Image generation fulfilled with URL:', payload?.substring(0, 50));
+        state.imageLoading = false;
+        state.generatedImageUrl = payload;
+        state.imageError = null;
+        
+        // Add to image history
+        state.imageHistory.push({
+          prompt: meta.arg.prompt,
+          url: payload,
+          timestamp: new Date().toISOString()
+        });
+        state.currentImageIndex = state.imageHistory.length - 1;
+      })
+      .addCase(generateImage.rejected, (state, { payload, error, meta }) => {
+        console.error('❌ Image generation rejected:', payload || error.message);
+        state.imageLoading = false;
+        state.imageError = payload ?? error.message ?? 'Image generation failed';
+        // Don't clear generatedImageUrl on error - keep previous image if any
+      });
+  },
 });
 
 export const {
   setInput,
   setSelectedModel,
+  setActiveTool,
   createNewConversation,
   switchConversation,
   deleteConversation,
   addMessage,
+  updateMessageText, // ✅ CRITICAL: This is the missing action that fixes image rendering
   addBotMessage,
   appendToLastBotMessage,
   finishStreaming,
@@ -778,6 +885,9 @@ export const {
   navigateUserEditVersion,
   replaceConversationTail,
   setUserBranchIndex,
+  clearGeneratedImage,
+  addToImageHistory,
+  clearToolStates,
 } = chatSlice.actions;
 
 export default chatSlice.reducer;

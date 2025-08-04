@@ -150,7 +150,7 @@ def web_search_tool(query: str, num_results: int = 5) -> List[str]:
         
 #         from google import genai
 #         # instantiate the Imagen model for image gen
-#         client = genai.Client(api_key="AIzaSyByXSr71jS3gk4WejSp2pzcAroM_jf4jP8")
+#         client = genai.Client(api_key=google_key)
 
 #         result = client.models.generate_images(
 #         model="models/imagen-3.0-generate-002",
@@ -218,7 +218,7 @@ def image_gen_tool(prompt: str) -> str:
             # Base64-encode and return a data URL
             b64 = base64.b64encode(img_bytes).decode("utf-8")
             print(f"Generated image URL: data:image/png;base64,{b64}")
-            open("generated_image.txt", "wb").write(img_bytes)  # Save for debugging
+            open("generated_image.png", "wb").write(img_bytes)  # Save for debugging
             return f"data:image/png;base64,{b64}"
             # resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
 

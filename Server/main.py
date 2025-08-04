@@ -141,6 +141,36 @@ async def get_available_models():
     
     return models
 
+# Add this debug endpoint to your main.py for testing image generation
+@app.get("/debug/image-test")
+async def debug_image_test():
+    """
+    Debug endpoint to test image generation without frontend
+    """
+    try:
+        test_prompt = "A beautiful sunset over mountains"
+        url = image_gen_tool(test_prompt)
+        
+        return {
+            "success": True,
+            "prompt": test_prompt,
+            "url": url,
+            "url_type": type(url).__name__,
+            "url_length": len(url),
+            "is_data_url": url.startswith("data:") if isinstance(url, str) else False,
+            "url_preview": url[:100] if isinstance(url, str) else str(url)[:100]
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+
+
+
 @app.get("/tools/search", response_model=SearchResponse)
 async def search_tool_endpoint(
     q: str = Query(..., description="Search query"),
