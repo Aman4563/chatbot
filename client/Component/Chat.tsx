@@ -963,10 +963,15 @@ const isInvalidSrc =
 
                                     // const cleanSrc = src.trim();
 
+                                    let imgUrl = generatedImageUrl;
+  if (imageHistory.length > 0 && currentImageIndex !== null) {
+    imgUrl = imageHistory[currentImageIndex]?.url;
+  }
+
                                     return (
                                       <div className="my-4 text-center">
                                         <img
-                                          src={cleanSrc}
+                                          src={imgUrl}
                                           alt={alt || 'Generated image'}
                                           {...props}
                                           className="max-w-full h-auto rounded-lg shadow-lg mx-auto cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02]"
