@@ -25,7 +25,7 @@ import {
   webSearch, 
   generateImage,
   addBotMessage,
-  updateMessageText
+  updateMessageText,
 } from '../chatSlice';
 import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X, Eye } from 'lucide-react';
 import { AppDispatch } from '@/store';
@@ -62,6 +62,8 @@ const Chat = () => {
     generatedImageUrl,
     imageLoading,
     imageError,
+    imageHistory,
+    currentImageIndex,
   } = useSelector((state: RootState) => state.chat);
 
   const [selectedFiles, setSelectedFiles] = useState<FileData[]>([]);

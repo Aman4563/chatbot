@@ -17,3 +17,4 @@ langchain_mistralai
 google.generativeai
 googlesearch-python
 huggingface_hub
+Pillow
