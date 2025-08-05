@@ -62,6 +62,9 @@ const Chat = () => {
     generatedImageUrl,
     imageLoading,
     imageError,
+    imageHistory,
+    currentImageIndex   
+
   } = useSelector((state: RootState) => state.chat);
 
   const [selectedFiles, setSelectedFiles] = useState<FileData[]>([]);
@@ -138,20 +141,18 @@ const Chat = () => {
 
   dispatch(setInput(''));  // clear input
 
+  
+
   try {
     // 3) call the thunk and pull out `.url` if needed
-    const payload = await dispatch(generateImage({ prompt: input })).unwrap();
-    const raw = typeof payload === 'string'
-      ? payload
-      : (payload as { url: string }).url;
+    const url: string = await dispatch(generateImage({ prompt: input })).unwrap(); 
 
-    // 4) sanity-check & trim away any stray `{}` or quotes
-    const cleanUrl = raw.replace(/^[{"']+|[}"']+$/g, '').trim();
-    if (!cleanUrl.startsWith('data:image')) {
-      throw new Error(`got bad URL: ${cleanUrl}`);
-    }
 
-    const markdown = `![Generated Image](${cleanUrl})\n\n*Prompt: "${input}"*`;
+console.log('🖼️ generateImage payload →', url);
+
+
+    const markdown = `![Generated Image](${url})\n\n*Prompt: "${input}"*`;
+
     // 5) replace the loading message
     dispatch(updateMessageText({
       conversationId: activeConversationId,
@@ -917,113 +918,70 @@ const Chat = () => {
                                   ),
                                   // ✅ BULLETPROOF Image Component with comprehensive validation
                                   img: ({ src, alt, ...props }) => {
-                                    console.log('🖼️ ReactMarkdown img render:', { 
-                                      src: src,
-                                      srcType: typeof src,
-                                      srcLength: src?.length,
-                                      alt,
-                                      srcPreview: src?.substring?.(0, 100)
-                                    });
-                                    
-                                    // Comprehensive validation
-                                    const cleanSrc = typeof src === 'string' ? src.trim() : '';
-const isInvalidSrc =
-  !cleanSrc ||
-  cleanSrc === 'undefined' ||
-  cleanSrc === 'null' ||
-  !(
-    cleanSrc.startsWith('data:image/') ||        // Accept data URLs
-    cleanSrc.startsWith('http://') ||
-    cleanSrc.startsWith('https://')
-  );
+      console.log('🔍 ReactMarkdown img src:', { src, type: typeof src });
 
+      // 3.1 Reject only if it’s not a non-empty string
+      // if (typeof src !== 'string' || !src.trim()) {
+      //   return (
+      //     <div className="p-4 bg-red-50 border border-red-200 rounded">
+      //       ❌ Empty or non-string image source
+      //     </div>
+      //   );
+      // }
 
-                                    if (isInvalidSrc) {
-                                      console.error('❌ Invalid src detected:', { src, alt, srcType: typeof src });
-                                      return (
-                                        <div className="my-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                                          <div className="text-red-600 font-medium mb-2">❌ Invalid image source</div>
-                                          <div className="text-xs text-gray-600 space-y-1">
-                                            <div><strong>Source:</strong> {String(src)}</div>
-                                            <div><strong>Type:</strong> {typeof src}</div>
-                                            <div><strong>Alt:</strong> {alt || 'none'}</div>
-                                          </div>
-                                          <button 
-                                            onClick={() => {
-                                              console.log('Full debug:', { src, alt, props });
-                                              alert(`Debug info logged to console`);
-                                            }}
-                                            className="mt-2 px-2 py-1 bg-red-500 text-white text-xs rounded"
-                                          >
-                                            Debug Console
-                                          </button>
-                                        </div>
-                                      );
-                                    }
+      // 3.2 Clean up any stray quotes
+      // const cleanSrc = src.trim().replace(/^"+|"+$/g, '');
+
+      // 3.3 Loosened check: allow any data:image or http(s)
+      // const validDataUrl = /^data:image\/[a-zA-Z]+;base64,.+$/.test(cleanSrc);
+      // const validHttpUrl = /^https?:\/\//.test(cleanSrc);
+      // if (!validDataUrl && !validHttpUrl) {
+      //   console.error('❌ Invalid image source:', cleanSrc);
+      //   return (
+      //     <div className="p-4 bg-red-50 border border-red-200 rounded">
+      //       <div className="font-medium text-red-600">❌ Invalid image source</div>
+      //       <div className="text-xs text-gray-600 break-all">
+      //         {cleanSrc.substring(0, 100)}{cleanSrc.length > 100 ? '…' : ''}
+      //       </div>
+      //     </div>
+      //   );
+      // }
+
 
                                     // const cleanSrc = src.trim();
+let imgUrl = generatedImageUrl;
+  if (imageHistory.length > 0 && currentImageIndex !== null) {
+    imgUrl = imageHistory[currentImageIndex]?.url;
+  }
 
-                                    return (
-                                      <div className="my-4 text-center">
-                                        <img
-                                          src={cleanSrc}
-                                          alt={alt || 'Generated image'}
-                                          {...props}
-                                          className="max-w-full h-auto rounded-lg shadow-lg mx-auto cursor-pointer hover:shadow-xl transition-all duration-200 hover:scale-[1.02]"
-                                          style={{ 
-                                            maxHeight: '500px', 
-                                            objectFit: 'contain',
-                                            backgroundColor: '#f9fafb'
-                                          }}
-                                          onLoad={() => console.log('✅ Image loaded:', cleanSrc.substring(0, 50))}
-                                          onError={(e) => {
-                                            console.error('❌ Image load error:', {
-                                              src: cleanSrc.substring(0, 50),
-                                              originalSrc: src,
-                                              isDataUrl: cleanSrc.startsWith('data:'),
-                                              length: cleanSrc.length
-                                            });
-                                            
-                                            const target = e.target as HTMLImageElement;
-                                            target.style.display = 'none';
-                                            
-                                            const errorDiv = document.createElement('div');
-                                            errorDiv.className = 'bg-red-50 border border-red-200 rounded-lg p-4 text-center text-red-600 my-4';
-                                            errorDiv.innerHTML = `
-                                              <div class="font-medium mb-2">Failed to load image</div>
-                                              <div class="text-xs text-gray-500 break-all mb-2">
-                                                ${cleanSrc.length > 100 ? cleanSrc.substring(0, 100) + '...' : cleanSrc}
-                                              </div>
-                                              <div class="text-xs">
-                                                <strong>Length:</strong> ${cleanSrc.length} | 
-                                                <strong>Type:</strong> ${cleanSrc.startsWith('data:') ? 'Data URL' : 'Regular URL'}
-                                              </div>
-                                            `;
-                                            
-                                            target.parentNode?.insertBefore(errorDiv, target.nextSibling);
-                                          }}
-                                          onClick={() => window.open(cleanSrc, '_blank')}
-                                          loading="lazy"
-                                          referrerPolicy="no-referrer"
-                                          crossOrigin="anonymous"
-                                        />
-                                        
-                                        {alt && alt !== 'Generated image' && (
-                                          <p className="text-sm text-gray-500 mt-2 italic px-4">
-                                            {alt}
-                                          </p>
-                                        )}
-                                        
-                                        <p className="text-xs text-gray-400 mt-1 opacity-0 hover:opacity-100 transition-opacity">
-                                          Click to view full size
-                                        </p>
-                                      </div>
-                                    );
-                                  },
-                                }}
-                              >
-                                {msg.text}
-                              </ReactMarkdown>
+                                   return (
+        <div className="my-4 text-center">
+          <img
+            src={imgUrl || src}
+            alt={alt || 'Generated image'}
+            {...props}
+            className="max-w-full hover:scale-[1.02] transition-transform"
+            style={{ maxHeight: '500px', objectFit: 'contain' }}
+            onLoad={() => console.log('✅ Image loaded OK')}
+            onError={(e) => {
+              console.error('❌ <img> load error', e);
+              (e.target as HTMLImageElement).style.display = 'none';
+            }}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            crossOrigin="anonymous"
+          />
+          {alt && alt !== 'Generated image' && (
+            <p className="mt-2 text-sm italic text-gray-500">{alt}</p>
+          )}
+        </div>
+      );
+    }
+  }}
+>
+  {msg.text}
+</ReactMarkdown>
+
                             </div>
                           )}
                         </div>
