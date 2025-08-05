@@ -184,63 +184,7 @@ from typing import List
 from huggingface_hub import InferenceClient
 from io import BytesIO
 
-def image_gen_tool(prompt: str) -> str:
-    """
-    1) Try Hugging Face’s free Stable Diffusion Inference API over HTTP.
-    2) If that fails for any reason, fall back to a random Picsum image.
-    Returns either a data-URL (base64 PNG) or an external URL.
-    """
-    hf_token = os.getenv("HUGGINGFACE_API_KEY")
-    if hf_token:
-        try:
-            print(f"Using Hugging Face token: {hf_token}")
-            client = InferenceClient(
-                provider="fal-ai",
-                api_key=hf_token,
-            )
-
-            # api_url = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
-            # headers = {
-            #     "Authorization": f"Bearer {hf_token}"
-            # }
-            payload = {"inputs": prompt}
-            image = client.text_to_image(
-                prompt,
-                model="ZB-Tech/Text-to-Image",
-            )
-            # print(f"Generated image: {image}")
-            # Convert PIL.Image to PNG bytes
-            buf = BytesIO()
-            image.save(buf, format="PNG")
-            buf.seek(0)
-            img_bytes = buf.getvalue()
-
-            # Base64-encode and return a data URL
-            b64 = base64.b64encode(img_bytes).decode("utf-8")
-            print(f"Generated image URL: data:image/png;base64,{b64}")
-            open("generated_image.png", "wb").write(img_bytes)  # Save for debugging
-            return f"data:image/png;base64,{b64}"
-            # resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
-
-            # ct = resp.headers.get("Content-Type", "")
-            # If HF returns raw image bytes:
-            # if resp.status_code == 200 and ct.startswith("image"):
-            #     img_bytes = resp.content
-            #     b64 = base64.b64encode(img_bytes).decode("utf-8")
-            #     return f"data:image/png;base64,{b64}"
-
-            # HF sometimes returns JSON with an error message:
-            # print("HF API returned non-image:", resp.status_code, ct, resp.text)
-
-        except Exception as e:
-            print("HuggingFace HTTP API failed:", e)
-
-    # Fallback for UI testing when HF fails or you hit free-tier limits
-    return "https://picsum.photos/512"
-# import os
-# import base64
-# import requests
-# from typing import List
+# Image generation tool using Hugging Face Inference API
 
 # def image_gen_tool(prompt: str) -> str:
 #     """
@@ -249,31 +193,103 @@ def image_gen_tool(prompt: str) -> str:
 #     Returns either a data-URL (base64 PNG) or an external URL.
 #     """
 #     hf_token = os.getenv("HUGGINGFACE_API_KEY")
-#     print(f"Using Hugging Face token: {hf_token is not None}")
 #     if hf_token:
 #         try:
-#             api_url = "https://api-inference.huggingface.co/models/ZB-Tech/Text-to-Image"
-#             headers = {
-#                 "Authorization": f"Bearer {hf_token}"
-#             }
-#             payload = {"inputs": prompt}
-#             resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+#             print(f"Using Hugging Face token: {hf_token}")
+#             client = InferenceClient(
+#                 provider="fal-ai",
+#                 api_key=hf_token,
+#             )
 
-#             ct = resp.headers.get("Content-Type", "")
+#             # api_url = "https://api-inference.huggingface.co/models/runwayml/stable-diffusion-v1-5"
+#             # headers = {
+#             #     "Authorization": f"Bearer {hf_token}"
+#             # }
+#             payload = {"inputs": prompt}
+#             image = client.text_to_image(
+#                 prompt,
+#                 model="ZB-Tech/Text-to-Image",
+#             )
+#             # print(f"Generated image: {image}")
+#             # Convert PIL.Image to PNG bytes
+#             buf = BytesIO()
+#             image.save(buf, format="PNG")
+#             buf.seek(0)
+#             img_bytes = buf.getvalue()
+
+#             # Base64-encode and return a data URL
+#             b64 = base64.b64encode(img_bytes).decode("utf-8")
+#             print(f"Generated image URL: data:image/png;base64,{b64}")
+#             open("generated_image.png", "wb").write(img_bytes)  # Save for debugging
+#             return f"data:image/png;base64,{b64}"
+#             # resp = requests.post(api_url, headers=headers, json=payload, timeout=60)
+
+#             # ct = resp.headers.get("Content-Type", "")
 #             # If HF returns raw image bytes:
-#             if resp.status_code == 200 and ct.startswith("image"):
-#                 img_bytes = resp.content
-#                 b64 = base64.b64encode(img_bytes).decode("utf-8")
-#                 return f"data:image/png;base64,{b64}"
+#             # if resp.status_code == 200 and ct.startswith("image"):
+#             #     img_bytes = resp.content
+#             #     b64 = base64.b64encode(img_bytes).decode("utf-8")
+#             #     return f"data:image/png;base64,{b64}"
 
 #             # HF sometimes returns JSON with an error message:
-#             print("HF API returned non-image:", resp.status_code, ct, resp.text)
+#             # print("HF API returned non-image:", resp.status_code, ct, resp.text)
 
 #         except Exception as e:
 #             print("HuggingFace HTTP API failed:", e)
 
 #     # Fallback for UI testing when HF fails or you hit free-tier limits
 #     return "https://picsum.photos/512"
+
+
+import time
+import requests
+
+def image_gen_tool(prompt: str, timeout: int = 30) -> str:
+    """
+    Call StarryAI to generate an image, polling until it’s done.
+    Returns the image URL or raises on timeout.
+    """
+    api_key = os.getenv("STARRY_API_KEY")  # or your hard-coded key
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "X-API-Key": api_key,
+    }
+    payload = {
+        "model": "cinematic",
+        "aspectRatio": "square",
+        "highResolution": False,
+        "images": 1,
+        "steps": 30,
+        "initialImageMode": "color",
+        "prompt": prompt
+    }
+
+    # 1) kick off the job
+    resp = requests.post("https://api.starryai.com/creations/", json=payload, headers=headers)
+    resp.raise_for_status()
+    job = resp.json()
+    creation_id = job.get("id")
+    if not creation_id:
+        raise RuntimeError(f"No creation ID returned: {job!r}")
+    print(resp.text)
+    # 2) poll until ready
+    url = f"https://api.starryai.com/creations/{creation_id}"
+    for _ in range(timeout):
+        time.sleep(2)
+        status_resp = requests.get(url, headers=headers)
+        status_resp.raise_for_status()
+        data = status_resp.json()
+
+        # adjust the status names if StarryAI uses different ones
+        if data.get("status") in ("succeeded", "completed"):
+            images = data.get("images") or []
+            if images and images[0].get("url"):
+                print(resp.text)
+                return images[0]["url"]
+
+    # if we get here, we timed out
+    raise RuntimeError(f"Image generation timed out after {timeout}s for job {creation_id}")
 
 
 

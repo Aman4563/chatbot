@@ -1,4 +1,3 @@
-// Chat.tsx - Complete fixed version with enhanced image handling
 import React, { useRef, useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import ReactMarkdown from 'react-markdown';
@@ -6,11 +5,11 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/atom-one-dark.css';
 import { visit } from 'unist-util-visit';
-
-import { 
-  setInput, 
-  sendChatMessageStream, 
-  addMessage, 
+import { ImageWithHistory } from './ImageWithHistory';
+import {
+  setInput,
+  sendChatMessageStream,
+  addMessage,
   createNewConversation,
   toggleMessageEdit,
   regenerateFromMessage,
@@ -19,13 +18,12 @@ import {
   FileData,
   Message,
   navigateUserEditVersion,
-  fetchAvailableModels,
   setUserBranchIndex,
   replaceConversationTail,
-  webSearch, 
+  webSearch,
   generateImage,
-  addBotMessage,
-  updateMessageText
+  updateMessageText,
+  addImageToHistory,
 } from '../chatSlice';
 import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X, Eye } from 'lucide-react';
 import { AppDispatch } from '@/store';
@@ -63,7 +61,7 @@ const Chat = () => {
     imageLoading,
     imageError,
     imageHistory,
-    currentImageIndex   
+    currentImageIndex
 
   } = useSelector((state: RootState) => state.chat);
 
@@ -77,12 +75,14 @@ const Chat = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [activeTool, setActiveTool] = useState<'chat' | 'search' | 'image'>('chat');
 
+
+
   const activeConversation = conversations.find(conv => conv.id === activeConversationId);
 
   // Search handler
   const handleSearch = async () => {
     if (!input.trim() || !activeConversationId) return;
-    
+
     dispatch(addMessage({
       conversationId: activeConversationId,
       message: {
@@ -92,14 +92,14 @@ const Chat = () => {
         timestamp: new Date().toISOString(),
       },
     }));
-    
+
     try {
       const results: string[] = await dispatch(webSearch({ query: input })).unwrap();
       const md = results.map((url, i) => `- [${url}](${url})`).join('\n');
       dispatch(addMessage({
         conversationId: activeConversationId,
         message: {
-          id: (Date.now()+1).toString(),
+          id: (Date.now() + 1).toString(),
           sender: 'Bot',
           text: `**Search Results**\n\n${md}`,
           timestamp: new Date().toISOString(),
@@ -114,60 +114,61 @@ const Chat = () => {
 
   // ✅ FIXED Image generation handler with comprehensive validation
   const handleGenerateImage = async () => {
-  if (!input.trim() || !activeConversationId) return;
+    if (!input.trim() || !activeConversationId) return;
 
-  // 1) re-add the user’s message…
-  dispatch(addMessage({
-    conversationId: activeConversationId,
-    message: {
-      id: Date.now().toString(),
-      sender: 'User',
-      text: input,
-      timestamp: new Date().toISOString(),
-    },
-  }));
-
-  // 2) insert a “Generating…” placeholder
-  const loadingId = (Date.now()+1).toString();
-  dispatch(addMessage({
-    conversationId: activeConversationId,
-    message: {
-      id: loadingId,
-      sender: 'Bot',
-      text: '🖼️ Generating image…',
-      timestamp: new Date().toISOString(),
-    },
-  }));
-
-  dispatch(setInput(''));  // clear input
-
-  
-
-  try {
-    // 3) call the thunk and pull out `.url` if needed
-    const url: string = await dispatch(generateImage({ prompt: input })).unwrap(); 
-
-
-console.log('🖼️ generateImage payload →', url);
-
-
-    const markdown = `![Generated Image](${url})\n\n*Prompt: "${input}"*`;
-
-    // 5) replace the loading message
-    dispatch(updateMessageText({
+    // 1) re-add the user’s message…
+    dispatch(addMessage({
       conversationId: activeConversationId,
-      messageId: loadingId,
-      newText: markdown,
+      message: {
+        id: Date.now().toString(),
+        sender: 'User',
+        text: input,
+        timestamp: new Date().toISOString(),
+      },
     }));
-  } catch (err: any) {
-    console.error(err);
-    dispatch(updateMessageText({
+
+    // 2) insert a “Generating…” placeholder
+    const loadingId = (Date.now() + 1).toString();
+    dispatch(addMessage({
       conversationId: activeConversationId,
-      messageId: loadingId,
-      newText: `❌ Image generation failed: ${err.message}`,
+      message: {
+        id: loadingId,
+        sender: 'Bot',
+        text: '🖼️ Generating image…',
+        timestamp: new Date().toISOString(),
+      },
     }));
-  }
-};
+
+    dispatch(setInput(''));  // clear input
+
+
+
+    try {
+      // 3) call the thunk and pull out `.url` if needed
+      const url: string = await dispatch(generateImage({ prompt: input })).unwrap();
+
+
+      console.log('🖼️ generateImage payload →', url);
+
+      // tell the slice to append it to history
+      dispatch(addImageToHistory({ prompt: input, url }));
+      const markdown = `![Generated Image](${url})\n\n*Prompt: "${input}"*`;
+
+      // 5) replace the loading message
+      dispatch(updateMessageText({
+        conversationId: activeConversationId,
+        messageId: loadingId,
+        newText: markdown,
+      }));
+    } catch (err: any) {
+      console.error(err);
+      dispatch(updateMessageText({
+        conversationId: activeConversationId,
+        messageId: loadingId,
+        newText: `❌ Image generation failed: ${err.message}`,
+      }));
+    }
+  };
 
 
   // Other handlers (keeping your existing ones)
@@ -258,19 +259,19 @@ console.log('🖼️ generateImage payload →', url);
 
   const copyChatAsMarkdown = async () => {
     if (!activeConversation) return;
-    
+
     const chatMarkdown = activeConversation.messages.map(msg => {
       const sender = msg.sender === 'User' ? '**You**' : '**Xbot**';
       const timestamp = new Date(msg.timestamp).toLocaleString();
       let content = `${sender} (${timestamp}):\n\n${msg.text || ''}`;
-      
+
       if (msg.files && msg.files.length > 0) {
         content += '\n\n*Attachments:*\n';
         msg.files.forEach(file => {
           content += `- ${file.filename} (${file.mime_type})\n`;
         });
       }
-      
+
       return content;
     }).join('\n\n---\n\n');
 
@@ -285,7 +286,7 @@ console.log('🖼️ generateImage payload →', url);
 
   // Enhanced Components for rendering
   const InlineCode = ({ children, ...props }: any) => (
-    <code 
+    <code
       className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono"
       {...props}
     >
@@ -343,7 +344,7 @@ console.log('🖼️ generateImage payload →', url);
             )}
           </button>
         </div>
-        
+
         {!isCollapsed && (
           <div className="relative">
             <pre className="bg-gray-900 text-gray-100 p-4 overflow-x-auto text-sm font-mono leading-relaxed custom-scrollbar max-h-96 overflow-y-auto">
@@ -353,7 +354,7 @@ console.log('🖼️ generateImage payload →', url);
             </pre>
           </div>
         )}
-        
+
         {isCollapsed && (
           <div className="bg-gray-50 px-4 py-3 text-sm text-gray-600">
             <span className="italic">Code block collapsed ({lines.length} lines)</span>
@@ -367,7 +368,7 @@ console.log('🖼️ generateImage payload →', url);
   const handleFileSelect = async (files: FileList) => {
     const fileDataArray: FileData[] = [];
     const maxSize = 10 * 1024 * 1024; // 10MB
-    
+
     const allowedTypes = [
       'image/jpeg', 'image/png', 'image/gif', 'image/webp',
       'text/plain', 'text/csv', 'application/json',
@@ -443,16 +444,16 @@ console.log('🖼️ generateImage payload →', url);
       };
 
       dispatch(addMessage({ conversationId: activeConversationId, message: userMessage }));
-      
+
       const messageToSend = input;
       const filesToSend = [...selectedFiles];
       dispatch(setInput(''));
       setSelectedFiles([]);
 
       try {
-        await dispatch(sendChatMessageStream({ 
-          message: messageToSend, 
-          files: filesToSend 
+        await dispatch(sendChatMessageStream({
+          message: messageToSend,
+          files: filesToSend
         })).unwrap();
       } catch (error) {
         console.error('Failed to send message:', error);
@@ -468,10 +469,10 @@ console.log('🖼️ generateImage payload →', url);
   };
 
   // Editable message component
-  const EditableMessage = ({ msg, onSave, onCancel }: { 
-    msg: Message; 
-    onSave: (text: string) => void; 
-    onCancel: () => void; 
+  const EditableMessage = ({ msg, onSave, onCancel }: {
+    msg: Message;
+    onSave: (text: string) => void;
+    onCancel: () => void;
   }) => {
     const [editText, setEditText] = useState(msg.text);
 
@@ -532,11 +533,11 @@ console.log('🖼️ generateImage payload →', url);
 
   const renderFilePreview = (file: FileData, index: number, isInMessage = false) => {
     const isImage = file.mime_type.startsWith('image/');
-    
+
     if (isImage) {
       return (
         <div key={index} className="relative inline-block m-1 group">
-          <img 
+          <img
             src={file.url || `data:${file.mime_type};base64,${file.data}`}
             alt={file.filename}
             className={`
@@ -591,10 +592,9 @@ console.log('🖼️ generateImage payload →', url);
   }
 
   return (
-    <div 
-      className={`flex-1 flex flex-col h-screen bg-white relative transition-all duration-300 ${
-        dragOver ? 'bg-blue-50' : ''
-      }`}
+    <div
+      className={`flex-1 flex flex-col h-screen bg-white relative transition-all duration-300 ${dragOver ? 'bg-blue-50' : ''
+        }`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -670,15 +670,15 @@ console.log('🖼️ generateImage payload →', url);
               </div>
             </div>
           )}
-          
+
           {activeConversation.messages.map((msg, idx) => (
             <div key={msg.id || idx} className={`mb-8 flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex gap-4 max-w-4xl ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}>
                 {/* Avatar */}
                 <div className={`
                   w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-1 shadow-lg
-                  ${msg.sender === 'User' 
-                    ? 'bg-gradient-to-br from-green-500 to-emerald-600' 
+                  ${msg.sender === 'User'
+                    ? 'bg-gradient-to-br from-green-500 to-emerald-600'
                     : 'bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600'
                   }
                 `}>
@@ -692,18 +692,17 @@ console.log('🖼️ generateImage payload →', url);
                 {/* Message Content */}
                 <div className={`
                   px-5 py-4 rounded-2xl shadow-lg border backdrop-blur-sm flex-1 relative group
-                  ${msg.sender === 'User' 
-                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20' 
+                  ${msg.sender === 'User'
+                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20'
                     : 'bg-white/90 text-gray-800 border-gray-200/50'
                   }
                   ${msg.sender === 'User' ? 'rounded-tr-lg' : 'rounded-tl-lg'}
                 `}>
-                  
+
                   {/* Action buttons */}
-                  <div className={`absolute top-2 ${
-                    msg.sender === 'User' ? 'left-2' : 'right-2'
-                  } flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200`}>
-                    
+                  <div className={`absolute top-2 ${msg.sender === 'User' ? 'left-2' : 'right-2'
+                    } flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200`}>
+
                     {/* User edit navigation */}
                     {msg.sender === 'User' && msg.branches && msg.branches.length > 1 && !msg.isEditing && !isLoading && (
                       <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200 mr-1">
@@ -727,7 +726,7 @@ console.log('🖼️ generateImage payload →', url);
                           title="Next branch"
                         >
                           <ChevronRight className="w-4 h-4 text-gray-600" />
-                        </button> 
+                        </button>
                       </div>
                     )}
 
@@ -744,11 +743,11 @@ console.log('🖼️ generateImage payload →', url);
                             >
                               <ChevronLeft className="w-4 h-4 text-gray-600" />
                             </button>
-                            
+
                             <span className="text-xs text-gray-500 px-2 font-medium">
                               {(msg.currentResponseIndex || 0) + 1} / {msg.responses.length}
                             </span>
-                            
+
                             <button
                               onClick={() => handleNavigateResponse(msg.id, 'next')}
                               disabled={(msg.currentResponseIndex || 0) === (msg.responses?.length || 1) - 1}
@@ -759,7 +758,7 @@ console.log('🖼️ generateImage payload →', url);
                             </button>
                           </div>
                         )}
-                        
+
                         <button
                           onClick={() => handleRegenerateResponse(msg.id)}
                           className="p-1.5 bg-white/90 hover:bg-gray-100 rounded-lg shadow-sm border border-gray-200 transition-all duration-200"
@@ -769,7 +768,7 @@ console.log('🖼️ generateImage payload →', url);
                         </button>
                       </>
                     )}
-                    
+
                     {/* User message edit button */}
                     {msg.sender === 'User' && !msg.isEditing && !isLoading && (
                       <button
@@ -781,7 +780,7 @@ console.log('🖼️ generateImage payload →', url);
                       </button>
                     )}
                   </div>
-                  
+
                   {/* Message content rendering */}
                   {msg.isEditing ? (
                     <EditableMessage
@@ -918,81 +917,36 @@ console.log('🖼️ generateImage payload →', url);
                                   ),
                                   // ✅ BULLETPROOF Image Component with comprehensive validation
                                   img: ({ src, alt, ...props }) => {
-      console.log('🔍 ReactMarkdown img src:', { src, type: typeof src });
+                                    console.log('🔍 ReactMarkdown img src:', { src, type: typeof src });
 
-      // 3.1 Reject only if it’s not a non-empty string
-      // if (typeof src !== 'string' || !src.trim()) {
-      //   return (
-      //     <div className="p-4 bg-red-50 border border-red-200 rounded">
-      //       ❌ Empty or non-string image source
-      //     </div>
-      //   );
-      // }
+                                    const imgUrl = imageHistory.length && currentImageIndex !== null
+                                      ? imageHistory[currentImageIndex].url
+                                      : src;
 
-      // 3.2 Clean up any stray quotes
-      // const cleanSrc = src.trim().replace(/^"+|"+$/g, '');
+                                    return (
+                                      <div className="my-4 text-center">
+                                        <ImageWithHistory src={src} alt={alt} maxHeight="500px" />
+                                        {alt && <p className="mt-2 text-sm italic text-gray-500">{alt}</p>}
+                                      </div>
+                                    );
 
-      // 3.3 Loosened check: allow any data:image or http(s)
-      // const validDataUrl = /^data:image\/[a-zA-Z]+;base64,.+$/.test(cleanSrc);
-      // const validHttpUrl = /^https?:\/\//.test(cleanSrc);
-      // if (!validDataUrl && !validHttpUrl) {
-      //   console.error('❌ Invalid image source:', cleanSrc);
-      //   return (
-      //     <div className="p-4 bg-red-50 border border-red-200 rounded">
-      //       <div className="font-medium text-red-600">❌ Invalid image source</div>
-      //       <div className="text-xs text-gray-600 break-all">
-      //         {cleanSrc.substring(0, 100)}{cleanSrc.length > 100 ? '…' : ''}
-      //       </div>
-      //     </div>
-      //   );
-      // }
-
-
-                                    // const cleanSrc = src.trim();
-let imgUrl = generatedImageUrl;
-  if (imageHistory.length > 0 && currentImageIndex !== null) {
-    imgUrl = imageHistory[currentImageIndex]?.url;
-  }
-
-                                   return (
-        <div className="my-4 text-center">
-          <img
-            src={imgUrl || src}
-            alt={alt || 'Generated image'}
-            {...props}
-            className="max-w-full hover:scale-[1.02] transition-transform"
-            style={{ maxHeight: '500px', objectFit: 'contain' }}
-            onLoad={() => console.log('✅ Image loaded OK')}
-            onError={(e) => {
-              console.error('❌ <img> load error', e);
-              (e.target as HTMLImageElement).style.display = 'none';
-            }}
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            crossOrigin="anonymous"
-          />
-          {alt && alt !== 'Generated image' && (
-            <p className="mt-2 text-sm italic text-gray-500">{alt}</p>
-          )}
-        </div>
-      );
-    }
-  }}
->
-  {msg.text}
-</ReactMarkdown>
+                                  }
+                                }}
+                              >
+                                {msg.text}
+                              </ReactMarkdown>
 
                             </div>
                           )}
                         </div>
                       )}
-                      
+
                       {msg.files && msg.files.length > 0 && (
                         <div className="mt-4">
                           {msg.files.map((file, fileIndex) => renderFilePreview(file, fileIndex, true))}
                         </div>
                       )}
-                      
+
                       {msg.isStreaming && (
                         <span className="inline-block w-0.5 h-5 bg-current ml-1 animate-pulse rounded-full"></span>
                       )}
@@ -1051,7 +1005,7 @@ let imgUrl = generatedImageUrl;
                 <Plus className="w-5 h-5" />
               </button>
             </div>
-            
+
             {/* Message Input Container */}
             <div className="flex-1 relative">
               <div className="relative flex">
@@ -1066,7 +1020,7 @@ let imgUrl = generatedImageUrl;
                   rows={1}
                   style={{ paddingRight: '60px' }}
                 />
-                
+
                 {(input.length > 0 || selectedFiles.length > 0) && (
                   <div className="absolute bottom-2 right-16 flex items-center gap-2">
                     {selectedFiles.length > 0 && (
@@ -1086,15 +1040,14 @@ let imgUrl = generatedImageUrl;
 
             {/* Tool Selection */}
             <div className="mb-2 flex items-center space-x-2 text-sm">
-              {['chat','search','image'].map(tool => (
+              {['chat', 'search', 'image'].map(tool => (
                 <button
                   key={tool}
                   onClick={() => setActiveTool(tool as any)}
-                  className={`px-2 py-1 rounded-full transition ${
-                    activeTool===tool
+                  className={`px-2 py-1 rounded-full transition ${activeTool === tool
                       ? 'bg-blue-600 text-white'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   {tool === 'chat' ? 'Chat' : tool === 'search' ? 'Search 🔍' : 'Image 🖼️'}
                 </button>
@@ -1120,7 +1073,7 @@ let imgUrl = generatedImageUrl;
               </button>
             </div>
           </div>
-          
+
           {/* Helper Text */}
           <div className="flex items-center justify-between mt-3 px-1">
             <div className="flex items-center gap-4 text-xs text-gray-500">
@@ -1134,7 +1087,7 @@ let imgUrl = generatedImageUrl;
               {input.length > 0 && `${input.length} characters`}
             </div>
           </div>
-          
+
           <input
             ref={fileInputRef}
             type="file"

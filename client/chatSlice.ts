@@ -545,6 +545,36 @@ const chatSlice = createSlice({
         }
       }
     },
+    // NEW: append a generated image to history
+    addImageToHistory: (state, action: PayloadAction<{ prompt: string; url: string }>) => {
+      state.imageHistory.push({
+        prompt: action.payload.prompt,
+        url: action.payload.url,
+        timestamp: new Date().toISOString(),
+      });
+      state.currentImageIndex = state.imageHistory.length - 1;
+      state.generatedImageUrl = action.payload.url;
+    },
+
+    // NEW: move back in history
+    prevImage: (state) => {
+      if (state.currentImageIndex !== null && state.currentImageIndex > 0) {
+        state.currentImageIndex!--;
+        state.generatedImageUrl = state.imageHistory[state.currentImageIndex!].url;
+      }
+    },
+
+    // NEW: move forward in history
+    nextImage: (state) => {
+      if (
+        state.currentImageIndex !== null &&
+        state.currentImageIndex < state.imageHistory.length - 1
+      ) {
+        state.currentImageIndex!++;
+        state.generatedImageUrl = state.imageHistory[state.currentImageIndex!].url;
+      }
+    },
+
     // ✅ CRITICAL FIX: Enhanced message updating with proper text handling
     updateMessageText: (state, action: PayloadAction<{ 
   conversationId: string; 
@@ -837,31 +867,51 @@ const chatSlice = createSlice({
       })
 
       // ✅ ENHANCED image generation reducers with proper state management
-      .addCase(generateImage.pending, (state, action) => {
-        console.log('🔄 Image generation pending for prompt:', action.meta.arg.prompt);
+      // .addCase(generateImage.pending, (state, action) => {
+      //   console.log('🔄 Image generation pending for prompt:', action.meta.arg.prompt);
+      //   state.imageLoading = true;
+      //   state.imageError = null;
+      //   // DON'T clear generatedImageUrl here - let it stay until new image is ready
+      // })
+      // .addCase(generateImage.fulfilled, (state, { payload, meta }) => {
+      //   console.log('✅ Image generation fulfilled with URL:', payload?.substring(0, 50));
+      //   state.imageLoading = false;
+      //   state.generatedImageUrl = payload;
+      //   state.imageError = null;
+        
+      //   // Add to image history
+      //   state.imageHistory.push({
+      //     prompt: meta.arg.prompt,
+      //     url: payload,
+      //     timestamp: new Date().toISOString()
+      //   });
+      //   state.currentImageIndex = state.imageHistory.length - 1;
+      // })
+      // .addCase(generateImage.rejected, (state, { payload, error, meta }) => {
+      //   console.error('❌ Image generation rejected:', payload || error.message);
+      //   state.imageLoading = false;
+      //   state.imageError = payload ?? error.message ?? 'Image generation failed';
+      //   // Don't clear generatedImageUrl on error - keep previous image if any
+      // })
+// hook into the image‐gen thunk:
+      .addCase(generateImage.pending, (state) => {
         state.imageLoading = true;
         state.imageError = null;
-        // DON'T clear generatedImageUrl here - let it stay until new image is ready
       })
-      .addCase(generateImage.fulfilled, (state, { payload, meta }) => {
-        console.log('✅ Image generation fulfilled with URL:', payload?.substring(0, 50));
+      .addCase(generateImage.fulfilled, (state, action) => {
         state.imageLoading = false;
-        state.generatedImageUrl = payload;
-        state.imageError = null;
-        
-        // Add to image history
+        // ➡️ append to history
         state.imageHistory.push({
-          prompt: meta.arg.prompt,
-          url: payload,
-          timestamp: new Date().toISOString()
+          prompt: action.meta.arg.prompt,
+          url: action.payload,
+          timestamp: new Date().toISOString(),
         });
         state.currentImageIndex = state.imageHistory.length - 1;
+        state.generatedImageUrl = action.payload;
       })
-      .addCase(generateImage.rejected, (state, { payload, error, meta }) => {
-        console.error('❌ Image generation rejected:', payload || error.message);
+      .addCase(generateImage.rejected, (state, action) => {
         state.imageLoading = false;
-        state.imageError = payload ?? error.message ?? 'Image generation failed';
-        // Don't clear generatedImageUrl on error - keep previous image if any
+        state.imageError = action.payload || action.error.message || 'Image failed';
       });
   },
 });
@@ -888,6 +938,7 @@ export const {
   clearGeneratedImage,
   addToImageHistory,
   clearToolStates,
+  addImageToHistory, prevImage, nextImage,
 } = chatSlice.actions;
 
 export default chatSlice.reducer;
