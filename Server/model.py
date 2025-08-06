@@ -173,7 +173,6 @@ def web_search_tool(query: str, num_results: int = 5) -> List[str]:
 #         img_resp = client.images.create(prompt=prompt, n=1, size="512x512")
 #         return img_resp["data"][0]["url"]
 
-#     raise RuntimeError("No GOOGLE_API_KEY or OPENAI_API_KEY available for image generation")
 
 
 
@@ -306,23 +305,7 @@ def get_model(model_name: str):
         raise ValueError(f"API key not found for {config['provider']} models")
     
     # Initialize model based on provider
-    if config["provider"] == "mistral":
-        return config["class"](
-            model=config["model"],
-            api_key=config["api_key"],
-            temperature=0.7,
-            max_tokens=8192,
-            streaming=True
-        )
-    elif config["provider"] == "openai":
-        return config["class"](
-            model=config["model"],
-            api_key=config["api_key"],
-            temperature=0.7,
-            max_tokens=8192,
-            streaming=True
-        )
-    elif config["provider"] == "anthropic":
+    if config["provider"] in ["mistral", "openai", "anthropic"]:
         return config["class"](
             model=config["model"],
             api_key=config["api_key"],
@@ -486,6 +469,39 @@ def process_document_for_langchain(file_data: FileData) -> str:
         print(f"Error processing document {file_data.filename}: {e}")
         return f"Error processing document {file_data.filename}: {str(e)}"
 
+def _process_files_for_content(files: List[FileData]) -> List[Dict[str, Any]]:
+    """Process files and return content list for message"""
+    content = []
+    for file_data in files:
+        if file_data.mime_type.startswith('image/'):
+            image_content = process_image_for_langchain(file_data)
+            if image_content:
+                content.append(image_content)
+        else:
+            doc_content = process_document_for_langchain(file_data)
+            content.append({"type": "text", "text": doc_content})
+    return content
+
+def _create_message_from_content(content: List[Dict[str, Any]]) -> HumanMessage:
+    """Create appropriate HumanMessage from content list"""
+    if len(content) == 1 and content[0].get("type") == "text":
+        return HumanMessage(content=content[0]["text"])
+    return HumanMessage(content=content)
+
+def _process_user_message(msg: APIMessage) -> HumanMessage:
+    """Process a user message and return HumanMessage"""
+    content = []
+    
+    # Add text content
+    if msg.content:
+        content.append({"type": "text", "text": msg.content})
+    
+    # Add files if any
+    if hasattr(msg, 'files') and msg.files:
+        content.extend(_process_files_for_content(msg.files))
+    
+    return _create_message_from_content(content)
+
 def build_conversation_messages(history: List[APIMessage], current_message: ChatRequest, system_prompt: str) -> List:
     """Build conversation messages for LangChain"""
     messages = []
@@ -497,37 +513,11 @@ def build_conversation_messages(history: List[APIMessage], current_message: Chat
     # Add conversation history
     for msg in history:
         if msg.role == 'user':
-            content = []
-            
-            # Add text content
-            if msg.content:
-                content.append({"type": "text", "text": msg.content})
-            
-            # Add files if any
-            if hasattr(msg, 'files') and msg.files:
-                for file_data in msg.files:
-                    if file_data.mime_type.startswith('image/'):
-                        # For vision-capable models
-                        image_content = process_image_for_langchain(file_data)
-                        if image_content:
-                            content.append(image_content)
-                    else:
-                        # For documents, add as text
-                        doc_content = process_document_for_langchain(file_data)
-                        content.append({"type": "text", "text": doc_content})
-            
-            if content:
-                if len(content) == 1 and content[0].get("type") == "text":
-                    # Simple text message
-                    messages.append(HumanMessage(content=content[0]["text"]))
-                else:
-                    # Multi-modal message
-                    messages.append(HumanMessage(content=content))
-        
+            messages.append(_process_user_message(msg))
         elif msg.role == 'assistant':
             messages.append(AIMessage(content=msg.content))
     
-    # Add current message
+    # Process current message
     current_content = []
     
     # Add text content
@@ -535,25 +525,17 @@ def build_conversation_messages(history: List[APIMessage], current_message: Chat
         current_content.append({"type": "text", "text": current_message.message.text})
     
     # Process attached files
-    for file_data in current_message.message.files:
-        if file_data.mime_type.startswith('image/'):
-            image_content = process_image_for_langchain(file_data)
-            if image_content:
-                current_content.append(image_content)
+    if current_message.message.files:
+        current_content.extend(_process_files_for_content(current_message.message.files))
+        for file_data in current_message.message.files:
+            if file_data.mime_type.startswith('image/'):
                 print(f"Added image for vision analysis: {file_data.filename}")
-        else:
-            doc_content = process_document_for_langchain(file_data)
-            current_content.append({"type": "text", "text": doc_content})
-            print(f"Added document for analysis: {file_data.filename}")
+            else:
+                print(f"Added document for analysis: {file_data.filename}")
     
     # Add current message to conversation
     if current_content:
-        if len(current_content) == 1 and current_content[0].get("type") == "text":
-            # Simple text message
-            messages.append(HumanMessage(content=current_content[0]["text"]))
-        else:
-            # Multi-modal message
-            messages.append(HumanMessage(content=current_content))
+        messages.append(_create_message_from_content(current_content))
     
     return messages
 

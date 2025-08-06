@@ -1,13 +1,13 @@
 // Sidebar.tsx - Enhanced sidebar with provider grouping and multi-model support
 
 import React, { useState, useEffect } from 'react';
-import { useSelector, useDispatch } from 'react-redux';
-import { Plus, MessageSquare, ChevronDown, ChevronUp, X, Bot, Menu, ChevronLeft, Settings, Trash2, Eye, FileText, Zap, Brain } from 'lucide-react';
-import { RootState } from '../store';
+import { useSelector } from 'react-redux';
+import { Plus, MessageSquare, ChevronDown, ChevronUp, Bot, Menu, ChevronLeft, Trash2, Eye, FileText, Zap, Brain } from 'lucide-react';
+import { RootState, useAppDispatch } from '../store';
 import { createNewConversation, switchConversation, deleteConversation, setSelectedModel, fetchAvailableModels } from '../chatSlice';
 
 const Sidebar = () => {
-  const dispatch = useDispatch();
+  const dispatch = useAppDispatch();
   const { 
     conversations, 
     activeConversationId, 
@@ -129,7 +129,7 @@ const Sidebar = () => {
             isCollapsed ? '' : 'py-3'
           }`}
         >
-          <Plus className={`${isCollapsed ? 'w-5 h-5' : 'w-5 h-5'}`} />
+          <Plus className="w-5 h-5" />
           {!isCollapsed && <span className="font-medium">New Chat</span>}
         </button>
       </div>
@@ -158,10 +158,10 @@ const Sidebar = () => {
                         {currentModel.provider}
                       </span>
                       {currentModel.supports_vision && (
-                        <Eye className="w-3 h-3 text-blue-400" title="Vision capable" />
+                        <Eye className="w-3 h-3 text-blue-400" />
                       )}
                       {currentModel.supports_files && (
-                        <FileText className="w-3 h-3 text-green-400" title="File analysis" />
+                        <FileText className="w-3 h-3 text-green-400" />
                       )}
                     </div>
                   )}
@@ -249,16 +249,21 @@ const Sidebar = () => {
 
       {/* Conversations List */}
       <div className="flex-1 overflow-y-auto px-4 space-y-2">
-        {conversations.length === 0 ? (
-          !isCollapsed && (
-            <div className="text-center py-8 text-slate-400">
-              <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p className="text-sm">No conversations yet</p>
-              <p className="text-xs mt-1">Start a new chat to begin</p>
-            </div>
-          )
-        ) : (
-          conversations.map((conversation) => (
+        {(() => {
+          if (conversations.length === 0) {
+            if (!isCollapsed) {
+              return (
+                <div className="text-center py-8 text-slate-400">
+                  <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">No conversations yet</p>
+                  <p className="text-xs mt-1">Start a new chat to begin</p>
+                </div>
+              );
+            }
+            return null;
+          }
+          
+          return conversations.map((conversation) => (
             <div
               key={conversation.id}
               onClick={() => handleConversationClick(conversation.id)}
@@ -311,8 +316,8 @@ const Sidebar = () => {
                 </button>
               )}
             </div>
-          ))
-        )}
+          ));
+        })()}
       </div>
 
       {/* Footer */}

@@ -278,25 +278,75 @@ export const sendChatMessageStream = createAsyncThunk(
   }
 );
 
+// Helper function to validate conversation state
+const validateConversationState = (state: { chat: ChatState }, messageId: string) => {
+  const { activeConversationId, conversations } = state.chat;
+
+  if (!activeConversationId) {
+    throw new Error('No active conversation');
+  }
+
+  const currentConversation = conversations.find(conv => conv.id === activeConversationId);
+  if (!currentConversation) {
+    throw new Error('Conversation not found');
+  }
+
+  const messageIndex = currentConversation.messages.findIndex(msg => msg.id === messageId);
+  if (messageIndex === -1) {
+    throw new Error('Message not found');
+  }
+
+  return { currentConversation, messageIndex };
+};
+
+// Helper function to handle streaming response
+const handleStreamingResponse = async (response: Response, dispatch: any) => {
+  dispatch(addBotMessage(''));
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    dispatch(finishStreaming());
+    return;
+  }
+
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.chunk) {
+            dispatch(appendToLastBotMessage(data.chunk));
+          } else if (data.done) {
+            dispatch(finishStreaming());
+            return;
+          }
+        } catch (e) {
+          console.error('Error parsing SSE data:', e);
+        }
+      }
+    }
+  }
+
+  dispatch(finishStreaming());
+};
+
 export const regenerateFromMessage = createAsyncThunk(
   'chat/regenerateFromMessage',
   async ({ messageId, newText, files = [] }: { messageId: string; newText: string; files?: FileData[] }, { dispatch, getState }) => {
     const state = getState() as { chat: ChatState };
-    const { activeConversationId, selectedModel, conversations } = state.chat;
+    const { selectedModel } = state.chat;
 
-    if (!activeConversationId) {
-      throw new Error('No active conversation');
-    }
-
-    const currentConversation = conversations.find(conv => conv.id === activeConversationId);
-    if (!currentConversation) {
-      throw new Error('Conversation not found');
-    }
-
-    const messageIndex = currentConversation.messages.findIndex(msg => msg.id === messageId);
-    if (messageIndex === -1) {
-      throw new Error('Message not found');
-    }
+    const { currentConversation, messageIndex } = validateConversationState(state, messageId);
 
     const historyMessages = currentConversation.messages.slice(0, messageIndex);
     const history = formatHistoryForAPI(historyMessages);
@@ -323,68 +373,84 @@ export const regenerateFromMessage = createAsyncThunk(
       throw new Error('Failed to regenerate response');
     }
 
-    dispatch(addBotMessage(''));
-
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (reader) {
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
-                dispatch(appendToLastBotMessage(data.chunk));
-              } else if (data.done) {
-                dispatch(finishStreaming());
-                return 'Regeneration completed';
-              }
-            } catch (e) {
-              console.error('Error parsing SSE data:', e);
-            }
-          }
-        }
-      }
-    }
-
-    dispatch(finishStreaming());
+    await handleStreamingResponse(response, dispatch);
     return 'Regeneration completed';
   }
 );
+
+// Helper function to validate response regeneration state
+const validateResponseRegeneration = (state: { chat: ChatState }, messageId: string) => {
+  const { activeConversationId, conversations } = state.chat;
+
+  if (!activeConversationId) {
+    throw new Error('No active conversation');
+  }
+
+  const currentConversation = conversations.find(conv => conv.id === activeConversationId);
+  if (!currentConversation) {
+    throw new Error('Conversation not found');
+  }
+
+  const messageIndex = currentConversation.messages.findIndex(msg => msg.id === messageId);
+  if (messageIndex === -1) {
+    throw new Error('Message not found');
+  }
+
+  const userMessage = messageIndex > 0 ? currentConversation.messages[messageIndex - 1] : null;
+  if (!userMessage || userMessage.sender !== 'User') {
+    throw new Error('No user message found to regenerate from');
+  }
+
+  return { currentConversation, messageIndex, userMessage };
+};
+
+// Helper function to handle response streaming
+const handleResponseStreaming = async (response: Response, messageId: string, dispatch: any) => {
+  let newResponseText = '';
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) {
+    dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
+    return;
+  }
+
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.chunk) {
+            newResponseText += data.chunk;
+          } else if (data.done) {
+            dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
+            return;
+          }
+        } catch (e) {
+          console.error('Error parsing SSE data:', e);
+        }
+      }
+    }
+  }
+
+  dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
+};
 
 export const regenerateResponse = createAsyncThunk(
   'chat/regenerateResponse',
   async (messageId: string, { dispatch, getState }) => {
     const state = getState() as { chat: ChatState };
-    const { activeConversationId, selectedModel, conversations } = state.chat;
+    const { selectedModel } = state.chat;
 
-    if (!activeConversationId) {
-      throw new Error('No active conversation');
-    }
-
-    const currentConversation = conversations.find(conv => conv.id === activeConversationId);
-    if (!currentConversation) {
-      throw new Error('Conversation not found');
-    }
-
-    const messageIndex = currentConversation.messages.findIndex(msg => msg.id === messageId);
-    if (messageIndex === -1) {
-      throw new Error('Message not found');
-    }
-
-    const userMessage = messageIndex > 0 ? currentConversation.messages[messageIndex - 1] : null;
-    if (!userMessage || userMessage.sender !== 'User') {
-      throw new Error('No user message found to regenerate from');
-    }
+    const { currentConversation, messageIndex, userMessage } = validateResponseRegeneration(state, messageId);
 
     const historyMessages = currentConversation.messages.slice(0, messageIndex - 1);
     const history = formatHistoryForAPI(historyMessages);
@@ -409,39 +475,7 @@ export const regenerateResponse = createAsyncThunk(
       throw new Error('Failed to regenerate response');
     }
 
-    let newResponseText = '';
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (reader) {
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
-                newResponseText += data.chunk;
-              } else if (data.done) {
-                dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
-                return 'Regeneration completed';
-              }
-            } catch (e) {
-              console.error('Error parsing SSE data:', e);
-            }
-          }
-        }
-      }
-    }
-
-    dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
+    await handleResponseStreaming(response, messageId, dispatch);
     return 'Regeneration completed';
   }
 );
@@ -532,7 +566,7 @@ const chatSlice = createSlice({
     deleteConversation: (state, action: PayloadAction<string>) => {
       state.conversations = state.conversations.filter(conv => conv.id !== action.payload);
       if (state.activeConversationId === action.payload) {
-        state.activeConversationId = state.conversations[0]?.id || null;
+        state.activeConversationId = state.conversations[0]?.id ?? null;
       }
     },
     addMessage: (state, action: PayloadAction<{ conversationId: string; message: Message }>) => {
@@ -681,12 +715,11 @@ const chatSlice = createSlice({
       const conversation = state.conversations.find(
         (c) => c.id === state.activeConversationId
       );
-      if (!conversation) return;
-
-      const msg = conversation.messages.find(
+      const msg = conversation?.messages.find(
         (m) => m.id === action.payload.messageId
       );
-      if (!msg || !msg.edits || msg.edits.length < 2) return;
+      
+      if (!msg?.edits || msg.edits.length < 2) return;
 
       const current = msg.currentEditIndex ?? (msg.edits.length - 1);
       const nextIndex =
@@ -696,26 +729,25 @@ const chatSlice = createSlice({
 
       msg.currentEditIndex = nextIndex;
       msg.text = msg.edits[nextIndex];
-      conversation.updatedAt = new Date().toISOString();
+      conversation!.updatedAt = new Date().toISOString();
     },
     navigateResponseVersion: (state, action: PayloadAction<{ messageId: string; direction: 'prev' | 'next' }>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
-      if (conversation) {
-        const message = conversation.messages.find(msg => msg.id === action.payload.messageId);
-        if (message && message.responses && message.responses.length > 1) {
-          const currentIndex = message.currentResponseIndex || 0;
-          let newIndex: number;
+      const message = conversation?.messages.find(msg => msg.id === action.payload.messageId);
+      
+      if (message?.responses && message.responses.length > 1) {
+        const currentIndex = message.currentResponseIndex || 0;
+        let newIndex: number;
 
-          if (action.payload.direction === 'prev') {
-            newIndex = Math.max(0, currentIndex - 1);
-          } else {
-            newIndex = Math.min(message.responses.length - 1, currentIndex + 1);
-          }
-
-          message.currentResponseIndex = newIndex;
-          message.text = message.responses[newIndex];
-          conversation.updatedAt = new Date().toISOString();
+        if (action.payload.direction === 'prev') {
+          newIndex = Math.max(0, currentIndex - 1);
+        } else {
+          newIndex = Math.min(message.responses.length - 1, currentIndex + 1);
         }
+
+        message.currentResponseIndex = newIndex;
+        message.text = message.responses[newIndex];
+        conversation!.updatedAt = new Date().toISOString();
       }
     },
     addResponseVersion: (state, action: PayloadAction<{ messageId: string; newResponse: string }>) => {

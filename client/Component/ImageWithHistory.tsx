@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 
 interface ImageWithHistoryProps {
-  src: string;
-  alt?: string;
-  maxHeight?: string | number;
+  readonly src: string;
+  readonly alt?: string;
+  readonly maxHeight?: string | number;
 }
 
 export function ImageWithHistory({ src, alt, maxHeight }: ImageWithHistoryProps) {

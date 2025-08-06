@@ -203,7 +203,7 @@ async def health_check():
     """
     try:
         available_models = len(MODEL_CONFIG)
-        providers = list(set([config["provider"] for config in MODEL_CONFIG.values()]))
+        providers = list({config["provider"] for config in MODEL_CONFIG.values()})
         
         return {
             "status": "healthy",

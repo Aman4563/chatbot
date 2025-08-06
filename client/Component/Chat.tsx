@@ -17,6 +17,7 @@ import {
   regenerateResponse,
   FileData,
   Message,
+  Conversation,
   navigateUserEditVersion,
   setUserBranchIndex,
   replaceConversationTail,
@@ -25,9 +26,8 @@ import {
   updateMessageText,
   addImageToHistory,
 } from '../chatSlice';
-import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X, Eye } from 'lucide-react';
-import { AppDispatch } from '@/store';
-import { RootState } from '@reduxjs/toolkit/query';
+import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X, Search } from 'lucide-react';
+import { AppDispatch, RootState } from '@/store';
 
 function rehypeStripHljs() {
   return (tree: any) => {
@@ -44,6 +44,132 @@ function rehypeStripHljs() {
   };
 }
 
+// Extracted components
+interface InlineCodeProps {
+  children: React.ReactNode;
+  [key: string]: any;
+}
+
+const InlineCode = ({ children, ...props }: InlineCodeProps) => (
+  <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-800" {...props}>
+    {children}
+  </code>
+);
+
+interface CodeBlockProps {
+  className?: string;
+  children: React.ReactNode;
+  [key: string]: any;
+}
+
+const CodeBlock = ({ className, children, ...props }: CodeBlockProps) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const blockId = useRef(Math.random().toString(36).substr(2, 9)).current;
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(String(children));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+    }
+  };
+
+  const toggleCollapse = () => {
+    setIsCollapsed(!isCollapsed);
+  };
+
+  const language = className ? className.replace('language-', '') : '';
+
+  return (
+    <div className="relative group">
+      <div className="flex items-center justify-between bg-gray-800 text-white px-4 py-2 rounded-t-lg">
+        <span className="text-sm font-mono">{language}</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleCollapse}
+            className="text-gray-300 hover:text-white transition-colors"
+            title={isCollapsed ? "Expand" : "Collapse"}
+          >
+            {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+          <button
+            onClick={handleCopy}
+            className="text-gray-300 hover:text-white transition-colors"
+            title="Copy code"
+          >
+            {copied ? <Check size={16} /> : <Copy size={16} />}
+          </button>
+        </div>
+      </div>
+      {!isCollapsed && (
+        <pre className="bg-gray-900 text-gray-100 p-4 rounded-b-lg overflow-x-auto">
+          <code className={className} {...props}>
+            {children}
+          </code>
+        </pre>
+      )}
+    </div>
+  );
+};
+
+interface EditableMessageProps {
+  msg: Message;
+  onSave: (text: string) => void;
+  onCancel: () => void;
+}
+
+const EditableMessage = ({ msg, onSave, onCancel }: EditableMessageProps) => {
+  const [editText, setEditText] = useState(msg.text);
+
+  const handleSave = () => {
+    if (editText.trim()) {
+      onSave(editText.trim());
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSave();
+    } else if (e.key === 'Escape') {
+      onCancel();
+    }
+  };
+
+  return (
+    <div className="bg-gray-50 rounded-lg p-4 border-2 border-blue-200 mt-2">
+      <textarea
+        value={editText}
+        onChange={(e) => setEditText(e.target.value)}
+        onKeyDown={handleKeyDown}
+        className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+        rows={Math.max(2, editText.split('\n').length)}
+        autoFocus
+      />
+      <div className="flex justify-end gap-2 mt-3">
+        <button
+          onClick={onCancel}
+          className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1 rounded hover:bg-gray-200 transition-colors"
+        >
+          <X size={14} />
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
+          disabled={!editText.trim()}
+        >
+          <Check size={14} />
+          Save & Regenerate
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const Chat = () => {
   const dispatch = useDispatch<AppDispatch>();
   const {
@@ -53,13 +179,6 @@ const Chat = () => {
     isLoading,
     error,
     selectedModel,
-    availableModels,
-    searchResults,
-    searchLoading,
-    searchError,
-    generatedImageUrl,
-    imageLoading,
-    imageError,
     imageHistory,
     currentImageIndex
 
@@ -77,7 +196,7 @@ const Chat = () => {
 
 
 
-  const activeConversation = conversations.find(conv => conv.id === activeConversationId);
+  const activeConversation = conversations.find((conv: Conversation) => conv.id === activeConversationId);
 
   // Search handler
   const handleSearch = async () => {
@@ -173,10 +292,10 @@ const Chat = () => {
 
   // Other handlers (keeping your existing ones)
   const handleNavigateUserEdit = (messageId: string, direction: 'prev' | 'next') => {
-    const conv = conversations.find(c => c.id === activeConversationId);
+    const conv = conversations.find((c: Conversation) => c.id === activeConversationId);
     if (!conv) return;
 
-    const idx = conv.messages.findIndex(m => m.id === messageId && m.sender === 'User');
+    const idx = conv.messages.findIndex((m: Message) => m.id === messageId && m.sender === 'User');
     if (idx < 0) return;
     const userMsg = conv.messages[idx];
 
@@ -260,14 +379,14 @@ const Chat = () => {
   const copyChatAsMarkdown = async () => {
     if (!activeConversation) return;
 
-    const chatMarkdown = activeConversation.messages.map(msg => {
+    const chatMarkdown = activeConversation.messages.map((msg: Message) => {
       const sender = msg.sender === 'User' ? '**You**' : '**Xbot**';
       const timestamp = new Date(msg.timestamp).toLocaleString();
       let content = `${sender} (${timestamp}):\n\n${msg.text || ''}`;
 
       if (msg.files && msg.files.length > 0) {
         content += '\n\n*Attachments:*\n';
-        msg.files.forEach(file => {
+        msg.files.forEach((file: FileData) => {
           content += `- ${file.filename} (${file.mime_type})\n`;
         });
       }
@@ -284,85 +403,7 @@ const Chat = () => {
     }
   };
 
-  // Enhanced Components for rendering
-  const InlineCode = ({ children, ...props }: any) => (
-    <code
-      className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono"
-      {...props}
-    >
-      {children}
-    </code>
-  );
 
-  const CodeBlock = ({ className, children, ...props }: any) => {
-    const code = String(children).replace(/\n$/, '');
-    const language = className?.replace(/language-/, '') || 'text';
-    const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
-    const isCollapsed = collapsedBlocks.has(blockId);
-    const lines = code.split('\n');
-    const shouldShowCollapse = lines.length > 10;
-
-    return (
-      <div className="my-4 rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-white">
-        <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            {shouldShowCollapse && (
-              <button
-                onClick={() => toggleCodeBlock(blockId)}
-                className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded hover:bg-gray-200"
-                title={isCollapsed ? "Expand code" : "Collapse code"}
-              >
-                {isCollapsed ? (
-                  <ChevronRight className="w-4 h-4" />
-                ) : (
-                  <ChevronDown className="w-4 h-4" />
-                )}
-              </button>
-            )}
-            <span className="text-gray-600 text-sm font-medium capitalize">
-              {language === 'text' ? 'Code' : language}
-            </span>
-            <span className="text-gray-500 text-xs">
-              {lines.length} line{lines.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-          <button
-            onClick={() => copyToClipboard(code, blockId)}
-            className="flex items-center gap-2 px-2.5 py-1 bg-white hover:bg-gray-100 text-gray-600 text-sm rounded border border-gray-300 transition-all duration-200"
-            title="Copy code"
-          >
-            {copiedCode === blockId ? (
-              <>
-                <Check className="w-3.5 h-3.5" />
-                <span>Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3.5 h-3.5" />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {!isCollapsed && (
-          <div className="relative">
-            <pre className="bg-gray-900 text-gray-100 p-4 overflow-x-auto text-sm font-mono leading-relaxed custom-scrollbar max-h-96 overflow-y-auto">
-              <code className={`language-${language}`} {...props}>
-                {children}
-              </code>
-            </pre>
-          </div>
-        )}
-
-        {isCollapsed && (
-          <div className="bg-gray-50 px-4 py-3 text-sm text-gray-600">
-            <span className="italic">Code block collapsed ({lines.length} lines)</span>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   // File handling functions
   const handleFileSelect = async (files: FileList) => {
@@ -469,58 +510,7 @@ const Chat = () => {
   };
 
   // Editable message component
-  const EditableMessage = ({ msg, onSave, onCancel }: {
-    msg: Message;
-    onSave: (text: string) => void;
-    onCancel: () => void;
-  }) => {
-    const [editText, setEditText] = useState(msg.text);
 
-    const handleSave = () => {
-      if (editText.trim()) {
-        onSave(editText.trim());
-      }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        handleSave();
-      } else if (e.key === 'Escape') {
-        onCancel();
-      }
-    };
-
-    return (
-      <div className="bg-gray-50 rounded-lg p-4 border-2 border-blue-200 mt-2">
-        <textarea
-          value={editText}
-          onChange={(e) => setEditText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
-          rows={Math.max(2, editText.split('\n').length)}
-          autoFocus
-        />
-        <div className="flex justify-end gap-2 mt-3">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1 rounded hover:bg-gray-200 transition-colors"
-          >
-            <X size={14} />
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
-            disabled={!editText.trim()}
-          >
-            <Check size={14} />
-            Save & Regenerate
-          </button>
-        </div>
-      </div>
-    );
-  };
 
   // File preview functions
   const getFileIcon = (mimeType: string) => {
@@ -671,7 +661,7 @@ const Chat = () => {
             </div>
           )}
 
-          {activeConversation.messages.map((msg, idx) => (
+          {activeConversation.messages.map((msg: Message, idx: number) => (
             <div key={msg.id || idx} className={`mb-8 flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex gap-4 max-w-4xl ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}>
                 {/* Avatar */}
@@ -807,10 +797,11 @@ const Chat = () => {
                                 remarkPlugins={[remarkGfm]}
                                 rehypePlugins={[rehypeHighlight, rehypeStripHljs]}
                                 components={{
-                                  code: ({ inline, className, children, ...props }) => {
+                                  code: ({ className, children, ...props }: any) => {
                                     const text = String(children).replace(/\n$/, '')
                                     const hasLang = Boolean(className)
                                     const isSingleLine = !text.includes('\n')
+                                    const inline = !className
 
                                     if (inline) {
                                       return <InlineCode {...props}>{children}</InlineCode>
@@ -919,13 +910,9 @@ const Chat = () => {
                                   img: ({ src, alt, ...props }) => {
                                     console.log('🔍 ReactMarkdown img src:', { src, type: typeof src });
 
-                                    const imgUrl = imageHistory.length && currentImageIndex !== null
-                                      ? imageHistory[currentImageIndex].url
-                                      : src;
-
                                     return (
                                       <div className="my-4 text-center">
-                                        <ImageWithHistory src={src} alt={alt} maxHeight="500px" />
+                                        <ImageWithHistory src={typeof src === 'string' ? src : ''} alt={alt} maxHeight="500px" />
                                         {alt && <p className="mt-2 text-sm italic text-gray-500">{alt}</p>}
                                       </div>
                                     );
@@ -943,7 +930,7 @@ const Chat = () => {
 
                       {msg.files && msg.files.length > 0 && (
                         <div className="mt-4">
-                          {msg.files.map((file, fileIndex) => renderFilePreview(file, fileIndex, true))}
+                          {msg.files.map((file: FileData, fileIndex: number) => renderFilePreview(file, fileIndex, true))}
                         </div>
                       )}
 
@@ -1040,18 +1027,29 @@ const Chat = () => {
 
             {/* Tool Selection */}
             <div className="mb-2 flex items-center space-x-2 text-sm">
-              {['chat', 'search', 'image'].map(tool => (
-                <button
-                  key={tool}
-                  onClick={() => setActiveTool(tool as any)}
-                  className={`px-2 py-1 rounded-full transition ${activeTool === tool
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                >
-                  {tool === 'chat' ? 'Chat' : tool === 'search' ? 'Search 🔍' : 'Image 🖼️'}
-                </button>
-              ))}
+              {['chat', 'search', 'image'].map(tool => {
+                const getToolContent = (toolType: string) => {
+                  if (toolType === 'chat') return { label: 'Chat', icon: null };
+                  if (toolType === 'search') return { label: 'Search', icon: <Search className="w-3 h-3" /> };
+                  return { label: 'Image', icon: <Image className="w-3 h-3" /> };
+                };
+
+                const { label, icon } = getToolContent(tool);
+
+                return (
+                  <button
+                    key={tool}
+                    onClick={() => setActiveTool(tool as any)}
+                    className={`px-3 py-1.5 rounded-full transition flex items-center gap-1.5 ${activeTool === tool
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                  >
+                    {icon}
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Send Button */}
@@ -1063,7 +1061,7 @@ const Chat = () => {
                   return handleSend();
                 }}
                 disabled={isLoading || (!input.trim() && selectedFiles.length === 0)}
-                className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
+                className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:scale-105 active:scale-95 flex items-center justify-center"
               >
                 {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
