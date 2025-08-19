@@ -1,15 +1,15 @@
 # main.py
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from typing import List
 import json
 import base64
-from schemas import ChatRequest, ChatResponse, FileData, FileUploadResponse, ModelInfo
-from model import my_genai_chat_function_stream
+from schemas import ChatRequest, ChatResponse, FileData, FileUploadResponse, ModelInfo,  SearchResponse, ImageGenRequest, ImageGenResponse
+from model import my_genai_chat_function_stream, MODEL_CONFIG, web_search_tool, image_gen_tool
 
-app = FastAPI(title="AI Chat API with Document Analysis", version="2.0.0")
+app = FastAPI(title="AI Chat API with Document Analysis", version="3.0.0")
 
 # Add CORS middleware
 app.add_middleware(
@@ -23,7 +23,7 @@ app.add_middleware(
 @app.post("/chat")
 async def chat_endpoint(payload: ChatRequest):
     """
-    Enhanced streaming chat endpoint with comprehensive multi-modal support and document analysis
+    Enhanced streaming chat endpoint with LangChain multi-model support
     """
     try:
         print(f"Received chat request:")
@@ -31,6 +31,10 @@ async def chat_endpoint(payload: ChatRequest):
         print(f" - Files: {len(payload.message.files)}")
         print(f" - History length: {len(payload.history)}")
         print(f" - Model: {payload.model_name}")
+        
+        # Validate model
+        if payload.model_name not in MODEL_CONFIG:
+            raise HTTPException(status_code=400, detail=f"Unsupported model: {payload.model_name}")
         
         # Log file types for debugging
         for file_data in payload.message.files:
@@ -121,67 +125,108 @@ async def upload_file(file: UploadFile = File(...)):
 @app.get("/models", response_model=List[ModelInfo])
 async def get_available_models():
     """
-    Return detailed information about available models with document analysis capabilities
+    Return detailed information about available models across different providers
     """
-    return [
-        ModelInfo(
-            name="gemini-1.5-flash",
-            display_name="Gemini 1.5 Flash",
-            description="Fast, efficient model for general tasks with document analysis",
-            supports_vision=True,
-            supports_files=True
-        ),
-        ModelInfo(
-            name="gemini-1.5-pro",
-            display_name="Gemini 1.5 Pro",
-            description="Advanced model with superior reasoning and document analysis",
-            supports_vision=True,
-            supports_files=True
-        ),
-        ModelInfo(
-            name="gemini-2.0-flash-exp",
-            display_name="Gemini 2.0 Flash (Experimental)",
-            description="Latest experimental model with enhanced capabilities",
-            supports_vision=True,
-            supports_files=True
-        ),
-        ModelInfo(
-            name="gemini-1.0-pro",
-            display_name="Gemini 1.0 Pro",
-            description="Stable model for text-based tasks and basic document analysis",
-            supports_vision=False,
-            supports_files=True
-        )
-    ]
+    models = []
+    
+    for model_name, config in MODEL_CONFIG.items():
+        models.append(ModelInfo(
+            name=model_name,
+            display_name=model_name.replace("-", " ").title(),
+            description=f"{config['provider'].title()} model with advanced capabilities",
+            supports_vision=config["supports_vision"],
+            supports_files=config["supports_files"],
+            provider=config["provider"]
+        ))
+    
+    return models
+
+# Add this debug endpoint to your main.py for testing image generation
+@app.get("/debug/image-test")
+async def debug_image_test():
+    """
+    Debug endpoint to test image generation without frontend
+    """
+    try:
+        test_prompt = "A beautiful sunset over mountains"
+        url = image_gen_tool(test_prompt)
+        
+        return {
+            "success": True,
+            "prompt": test_prompt,
+            "url": url,
+            "url_type": type(url).__name__,
+            "url_length": len(url),
+            "is_data_url": url.startswith("data:") if isinstance(url, str) else False,
+            "url_preview": url[:100] if isinstance(url, str) else str(url)[:100]
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+
+
+
+@app.get("/tools/search", response_model=SearchResponse)
+async def search_tool_endpoint(
+    q: str = Query(..., description="Search query"),
+    num_results: int = Query(5, gt=0, le=20)
+):
+    """
+    Tool: Web search (top N URLs).
+    """
+    try:
+        results = web_search_tool(q, num_results)
+        return SearchResponse(query=q, results=results)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/tools/image", response_model=ImageGenResponse)
+async def image_tool_endpoint(body: ImageGenRequest):
+    """
+    Tool: Image generation via Gemini or DALL·E fallback.
+    """
+    try:
+        url = image_gen_tool(body.prompt)
+        return ImageGenResponse(prompt=body.prompt, url=url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health", response_model=dict)
 async def health_check():
     """
-    Enhanced health check with document processing capabilities
+    Enhanced health check with LangChain multi-model support
     """
     try:
-        # You could add actual model health checks here
+        available_models = len(MODEL_CONFIG)
+        providers = list({config["provider"] for config in MODEL_CONFIG.values()})
+        
         return {
             "status": "healthy",
-            "message": "Chat API with Document Analysis is running",
-            "models_available": 4,
+            "message": "Multi-Model Chat API with LangChain is running",
+            "models_available": available_models,
+            "providers": providers,
             "features": [
-                "streaming", 
-                "vision", 
-                "pdf_analysis", 
-                "word_documents", 
-                "csv_analysis", 
+                "streaming",
+                "vision",
+                "pdf_analysis",
+                "word_documents",
+                "csv_analysis",
                 "json_processing",
                 "context_awareness",
-                "multi_modal"
+                "multi_modal",
+                "multi_provider"
             ],
             "supported_formats": [
-                "PDF", "DOCX", "CSV", "JSON", "TXT", 
-                "Images (JPEG, PNG, GIF, WebP)", 
+                "PDF", "DOCX", "CSV", "JSON", "TXT",
+                "Images (JPEG, PNG, GIF, WebP)",
                 "Markdown", "XML"
             ]
         }
-    
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
 
@@ -189,16 +234,14 @@ async def health_check():
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "AI Chat API with Document Analysis",
-        "version": "2.0.0",
+        "message": "Multi-Model AI Chat API with LangChain",
+        "version": "3.0.0",
         "documentation": "/docs",
         "features": [
-            "Multi-modal chat with streaming",
-            "PDF document analysis",
-            "Word document processing", 
-            "CSV data analysis",
-            "JSON file processing",
-            "Image analysis and vision",
-            "Context-aware conversations"
+            "Multi-provider LLM support",
+            "Streaming responses",
+            "Document analysis",
+            "Vision capabilities",
+            "File processing"
         ]
     }
