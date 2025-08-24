@@ -23,6 +23,7 @@ export type Message = {
   currentResponseIndex?: number;
   edits?: string[];
   currentEditIndex?: number;
+  editTails?: Message[][]; // Store conversation tail for each edit version
   branches?: Message[][];
   currentBranchIndex?: number;
 };
@@ -260,7 +261,10 @@ export const sendChatMessageStream = createAsyncThunk(
             try {
               const data = JSON.parse(line.slice(6));
               if (data.chunk) {
+                // Dispatch chunk immediately for real-time streaming
                 dispatch(appendToLastBotMessage(data.chunk));
+                // Small delay to ensure UI updates smoothly
+                await new Promise(resolve => setTimeout(resolve, 5));
               } else if (data.done) {
                 dispatch(finishStreaming());
                 return 'Streaming completed';
@@ -629,8 +633,13 @@ const chatSlice = createSlice({
     appendToLastBotMessage: (state, action: PayloadAction<string>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
       if (conversation && state.streamingMessageIndex !== null) {
-        conversation.messages[state.streamingMessageIndex].text += action.payload;
-        conversation.updatedAt = new Date().toISOString();
+        const message = conversation.messages[state.streamingMessageIndex];
+        if (message) {
+          message.text += action.payload;
+          // Ensure the message is marked as streaming for proper UI rendering
+          message.isStreaming = true;
+          conversation.updatedAt = new Date().toISOString();
+        }
       }
     },
     finishStreaming: (state) => {
@@ -665,11 +674,23 @@ const chatSlice = createSlice({
       if (idx === -1) return;
 
       const msg = conversation.messages[idx];
+      
+      // Capture the CURRENT conversation tail before any changes
+      const currentTail = conversation.messages.slice(idx + 1);
 
+      // Initialize edits and editTails if they don't exist
       if (!msg.edits) {
         msg.edits = [msg.text];
+        msg.editTails = [currentTail]; // Store current tail for original version
+      } else {
+        // If edits exist, store the current conversation tail for the current edit version
+        const currentEditIndex = msg.currentEditIndex ?? (msg.edits.length - 1);
+        if (msg.editTails && msg.editTails[currentEditIndex] !== undefined) {
+          msg.editTails[currentEditIndex] = currentTail;
+        }
       }
 
+      // Add new edit version
       msg.edits.push(action.payload.newText);
       msg.currentEditIndex = msg.edits.length - 1;
       msg.text = action.payload.newText;
@@ -677,6 +698,13 @@ const chatSlice = createSlice({
       msg.isEditing = false;
       msg.timestamp = new Date().toISOString();
 
+      // Initialize editTails array if needed and add slot for new edit
+      if (!msg.editTails) {
+        msg.editTails = [];
+      }
+      msg.editTails.push([]); // Empty tail for new edit, will be filled when response comes
+
+      // Truncate conversation after this message
       conversation.messages = conversation.messages.slice(0, idx + 1);
       conversation.updatedAt = new Date().toISOString();
     },
@@ -689,9 +717,12 @@ const chatSlice = createSlice({
       );
       if (!conversation) return;
 
-      const msg = conversation.messages.find(
+      const msgIndex = conversation.messages.findIndex(
         (m) => m.id === action.payload.messageId
       );
+      if (msgIndex === -1) return;
+      
+      const msg = conversation.messages[msgIndex];
       if (!msg || !msg.edits || msg.edits.length < 2) return;
 
       const current = msg.currentEditIndex ?? (msg.edits.length - 1);
@@ -700,9 +731,30 @@ const chatSlice = createSlice({
           ? Math.max(0, current - 1)
           : Math.min(msg.edits.length - 1, current + 1);
 
-      msg.currentEditIndex = nextIndex;
-      msg.text = msg.edits[nextIndex];
-      conversation.updatedAt = new Date().toISOString();
+      // Only navigate if we can actually move
+      if (nextIndex !== current) {
+        // First, preserve current conversation tail before switching
+        const currentTail = conversation.messages.slice(msgIndex + 1);
+        if (msg.editTails && current < msg.editTails.length) {
+          msg.editTails[current] = currentTail;
+        }
+
+        // Switch to the new edit version
+        msg.currentEditIndex = nextIndex;
+        msg.text = msg.edits[nextIndex];
+        
+        // Restore conversation tail for this edit version
+        if (msg.editTails && nextIndex < msg.editTails.length && msg.editTails[nextIndex]) {
+          const head = conversation.messages.slice(0, msgIndex + 1);
+          const tail = msg.editTails[nextIndex];
+          conversation.messages = [...head, ...tail];
+        } else {
+          // If no tail exists for this edit, truncate after user message
+          conversation.messages = conversation.messages.slice(0, msgIndex + 1);
+        }
+        
+        conversation.updatedAt = new Date().toISOString();
+      }
     },
     navigateResponseVersion: (state, action: PayloadAction<{ messageId: string; direction: 'prev' | 'next' }>) => {
       const conversation = state.conversations.find(conv => conv.id === state.activeConversationId);
@@ -831,8 +883,23 @@ const chatSlice = createSlice({
         const userMsg = conv.messages[idx];
         const newTail = conv.messages.slice(idx + 1);
 
-        userMsg.branches!.push(newTail);
-        userMsg.currentBranchIndex = userMsg.branches!.length - 1;
+        // If this message has edits, store the response in editTails
+        if (userMsg.edits && userMsg.editTails) {
+          const currentEditIndex = userMsg.currentEditIndex ?? (userMsg.edits.length - 1);
+          // Store the new response tail for the current edit version
+          if (currentEditIndex < userMsg.editTails.length) {
+            userMsg.editTails[currentEditIndex] = newTail;
+          }
+        }
+        
+        // Also handle branches for backward compatibility
+        if (userMsg.branches) {
+          userMsg.branches.push(newTail);
+          userMsg.currentBranchIndex = userMsg.branches.length - 1;
+        } else {
+          userMsg.branches = [newTail];
+          userMsg.currentBranchIndex = 0;
+        }
       })
       .addCase(regenerateFromMessage.rejected, (state, action) => {
         state.isLoading = false;

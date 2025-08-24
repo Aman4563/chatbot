@@ -6,16 +6,12 @@ import io
 import json
 import os
 import re
-from io import BytesIO
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import dotenv
 import docx
 import PyPDF2
 from huggingface_hub import InferenceClient
-
-# New Google SDK import kept (not used directly for tools due to wrapper limits)
-from google.genai import types  # noqa: F401
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_anthropic import ChatAnthropic
@@ -28,7 +24,7 @@ from schemas import ChatRequest, FileData, Message as APIMessage
 dotenv.load_dotenv()
 
 # ==============================
-# Cached environment keys / toggles
+# Environment configuration
 # ==============================
 ENV_KEYS = {
     "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY"),
@@ -39,105 +35,59 @@ ENV_KEYS = {
 }
 
 def _get_env_flag(name: str, default: str) -> str:
-    v = os.getenv(name)
-    return v.strip().lower() if isinstance(v, str) and v.strip() else default
+    """Get environment variable as lowercase flag."""
+    value = os.getenv(name)
+    return value.strip().lower() if isinstance(value, str) and value.strip() else default
 
 def _get_env_int(name: str, default: int) -> int:
+    """Get environment variable as integer with fallback."""
     try:
         return int(os.getenv(name, "").strip())
-    except Exception:
+    except (ValueError, AttributeError):
         return default
 
-# Explicit control knobs
-GEMINI_TOOL_DEFAULT = _get_env_flag("GEMINI_TOOL_DEFAULT", "auto")  # auto|always|never
+# Gemini tool configuration
+GEMINI_TOOL_DEFAULT = _get_env_flag("GEMINI_TOOL_DEFAULT", "auto")
 GEMINI_TOOL_MAX_QUERIES = _get_env_int("GEMINI_TOOL_MAX_QUERIES", 2)
 GEMINI_TOOL_DISABLE_FOR_CS = _get_env_flag("GEMINI_TOOL_DISABLE_FOR_CS", "1") in {"1", "true", "yes"}
-GEMINI_IMAGE_TOOL_DEFAULT = _get_env_flag("GEMINI_IMAGE_TOOL_DEFAULT", "auto")  # auto|always|never
+GEMINI_IMAGE_TOOL_DEFAULT = _get_env_flag("GEMINI_IMAGE_TOOL_DEFAULT", "never")
+
+# ==============================
+# Model configuration helpers
+# ==============================
+def _create_model_config(provider: str, model_class, model_name: str, 
+                        supports_vision: bool = True, supports_files: bool = True) -> Dict[str, Any]:
+    """Create standardized model configuration."""
+    return {
+        "provider": provider,
+        "class": model_class,
+        "model": model_name,
+        "supports_vision": supports_vision,
+        "supports_files": supports_files,
+        "api_key": ENV_KEYS[f"{provider.upper()}_API_KEY"],
+    }
 
 # ==============================
 # Model configuration (providers)
 # ==============================
 MODEL_CONFIG: Dict[str, Dict[str, Any]] = {
-    "mistral-large": {
-        "provider": "mistral",
-        "class": ChatMistralAI,
-        "model": "mistral-large-latest",
-        "supports_vision": False,
-        "supports_files": True,
-        "api_key": ENV_KEYS["MISTRAL_API_KEY"],
-    },
-    "mistral-small": {
-        "provider": "mistral",
-        "class": ChatMistralAI,
-        "model": "mistral-small-latest",
-        "supports_vision": False,
-        "supports_files": True,
-        "api_key": ENV_KEYS["MISTRAL_API_KEY"],
-    },
-    "gpt-4o": {
-        "provider": "openai",
-        "class": ChatOpenAI,
-        "model": "gpt-4o",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["OPENAI_API_KEY"],
-    },
-    "gpt-4o-mini": {
-        "provider": "openai",
-        "class": ChatOpenAI,
-        "model": "gpt-4o-mini",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["OPENAI_API_KEY"],
-    },
-    "claude-3-5-sonnet": {
-        "provider": "anthropic",
-        "class": ChatAnthropic,
-        "model": "claude-3-5-sonnet-20241022",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["ANTHROPIC_API_KEY"],
-    },
-    "gemini-1.5-pro": {
-        "provider": "google",
-        "class": ChatGoogleGenerativeAI,
-        "model": "gemini-1.5-pro",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["GOOGLE_API_KEY"],
-    },
-    "gemini-1.5-flash": {
-        "provider": "google",
-        "class": ChatGoogleGenerativeAI,
-        "model": "gemini-1.5-flash",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["GOOGLE_API_KEY"],
-    },
-    "gemini-2.0-flash": {
-        "provider": "google",
-        "class": ChatGoogleGenerativeAI,
-        "model": "gemini-2.0-flash",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["GOOGLE_API_KEY"],
-    },
-    "gemini-2.5-flash": {
-        "provider": "google",
-        "class": ChatGoogleGenerativeAI,
-        "model": "gemini-2.5-flash",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["GOOGLE_API_KEY"],
-    },
-    "gemini-2.5-pro": {
-        "provider": "google",
-        "class": ChatGoogleGenerativeAI,
-        "model": "gemini-2.5-pro",
-        "supports_vision": True,
-        "supports_files": True,
-        "api_key": ENV_KEYS["GOOGLE_API_KEY"],
-    },
+    # Mistral models
+    "mistral-large": _create_model_config("mistral", ChatMistralAI, "mistral-large-latest", False),
+    "mistral-small": _create_model_config("mistral", ChatMistralAI, "mistral-small-latest", False),
+    
+    # OpenAI models
+    "gpt-4o": _create_model_config("openai", ChatOpenAI, "gpt-4o"),
+    "gpt-4o-mini": _create_model_config("openai", ChatOpenAI, "gpt-4o-mini"),
+    
+    # Anthropic models
+    "claude-3-5-sonnet": _create_model_config("anthropic", ChatAnthropic, "claude-3-5-sonnet-20241022"),
+    
+    # Google Gemini models
+    "gemini-1.5-pro": _create_model_config("google", ChatGoogleGenerativeAI, "gemini-1.5-pro"),
+    "gemini-1.5-flash": _create_model_config("google", ChatGoogleGenerativeAI, "gemini-1.5-flash"),
+    "gemini-2.0-flash": _create_model_config("google", ChatGoogleGenerativeAI, "gemini-2.0-flash"),
+    "gemini-2.5-flash": _create_model_config("google", ChatGoogleGenerativeAI, "gemini-2.5-flash"),
+    "gemini-2.5-pro": _create_model_config("google", ChatGoogleGenerativeAI, "gemini-2.5-pro"),
 }
 
 # ================
@@ -171,65 +121,72 @@ def process_image_for_langchain(file_data: FileData) -> Optional[Dict[str, Any]]
         print(f"Error processing image {file_data.filename}: {e}")
         return None
 
-def extract_pdf_content(file_data: FileData) -> str:
+# Content extraction registry
+CONTENT_EXTRACTORS = {
+    "application/pdf": lambda data: _extract_pdf_content(data),
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": lambda data: _extract_docx_content(data),
+    "text/csv": lambda data: _extract_csv_content(data),
+    "application/json": lambda data: _extract_json_content(data),
+    "text/plain": lambda data: base64.b64decode(data).decode("utf-8"),
+}
+
+def _extract_pdf_content(data: str) -> str:
     """Extract text content from a PDF."""
     try:
-        decoded = base64.b64decode(file_data.data)
-        pdf_file = io.BytesIO(decoded)
-        reader = PyPDF2.PdfReader(pdf_file)
-        out = []
+        decoded = base64.b64decode(data)
+        reader = PyPDF2.PdfReader(io.BytesIO(decoded))
+        pages = []
         for i, page in enumerate(reader.pages, 1):
             try:
                 text = page.extract_text() or ""
+                if text.strip():
+                    pages.append(f"--- Page {i} ---\n{text}")
             except Exception as e:
-                text = f"[Error extracting page {i}: {e}]"
-            if text.strip():
-                out.append(f"--- Page {i} ---\n{text}")
-        return "\n".join(out) if out else "PDF appears empty or image-only."
+                pages.append(f"[Error extracting page {i}: {e}]")
+        return "\n".join(pages) if pages else "PDF appears empty or image-only."
     except Exception as e:
         return f"Error extracting PDF: {e}"
 
-def extract_docx_content(file_data: FileData) -> str:
+def _extract_docx_content(data: str) -> str:
     """Extract text content from a DOCX file."""
     try:
-        decoded = base64.b64decode(file_data.data)
-        docx_file = io.BytesIO(decoded)
-        document = docx.Document(docx_file)
-        parts: List[str] = []
-        for p in document.paragraphs:
-            if p.text.strip():
-                parts.append(p.text)
+        decoded = base64.b64decode(data)
+        document = docx.Document(io.BytesIO(decoded))
+        parts = [p.text for p in document.paragraphs if p.text.strip()]
+        
+        # Add table content
         for table in document.tables:
             parts.append("\n--- Table ---")
-            for row in table.rows:
-                parts.append(" | ".join(cell.text.strip() for cell in row.cells))
+            parts.extend(" | ".join(cell.text.strip() for cell in row.cells) for row in table.rows)
+        
         return "\n".join(parts) if parts else "Word document appears to be empty."
     except Exception as e:
         return f"Error extracting Word document content: {e}"
 
-def extract_csv_content(file_data: FileData) -> str:
-    """Extract and lightly format CSV content (first 100 rows)."""
+def _extract_csv_content(data: str) -> str:
+    """Extract and format CSV content (first 100 rows)."""
     try:
-        decoded = base64.b64decode(file_data.data).decode("utf-8")
+        decoded = base64.b64decode(data).decode("utf-8")
         csv_reader = csv.reader(io.StringIO(decoded))
-        lines: List[str] = ["CSV Data:"]
+        lines = ["CSV Data:"]
+        
         for idx, row in enumerate(csv_reader, 1):
             if idx == 1:
-                lines.append("Headers: " + " | ".join(row))
-                lines.append("-" * 50)
+                lines.extend(["Headers: " + " | ".join(row), "-" * 50])
             else:
                 lines.append(f"Row {idx - 1}: " + " | ".join(row))
             if idx >= 100:
                 lines.append("... (showing first 100 rows)")
                 break
+        
         return "\n".join(lines)
     except Exception as e:
         return f"Error processing CSV: {e}"
 
-def extract_json_content(file_data: FileData) -> str:
+def _extract_json_content(data: str) -> str:
     """Pretty-print JSON content."""
     try:
-        decoded = base64.b64decode(file_data.data).decode("utf-8")
+        decoded = base64.b64decode(data).decode("utf-8")
         obj = json.loads(decoded)
         return "JSON Data:\n" + json.dumps(obj, indent=2, ensure_ascii=False)
     except json.JSONDecodeError as e:
@@ -238,24 +195,20 @@ def extract_json_content(file_data: FileData) -> str:
         return f"Error processing JSON: {e}"
 
 def process_document_for_langchain(file_data: FileData) -> str:
-    """Route to the right extractor for supported document types."""
+    """Route to the appropriate extractor for supported document types."""
     try:
-        if file_data.mime_type == "text/plain":
-            decoded = base64.b64decode(file_data.data).decode("utf-8")
-            return f"Text Document: {file_data.filename}\n\n{decoded}"
-        if file_data.mime_type == "text/csv":
-            return f"CSV Document: {file_data.filename}\n\n{extract_csv_content(file_data)}"
-        if file_data.mime_type == "application/json":
-            return f"JSON Document: {file_data.filename}\n\n{extract_json_content(file_data)}"
-        if file_data.mime_type == "application/pdf":
-            return f"PDF Document: {file_data.filename}\n\nExtracted Content:\n{extract_pdf_content(file_data)}"
-        if file_data.mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-            return f"Word Document: {file_data.filename}\n\nExtracted Content:\n{extract_docx_content(file_data)}"
+        # Handle legacy Word documents
         if file_data.mime_type == "application/msword":
-            return (
-                f"Legacy Word Document: {file_data.filename}\n\n"
-                "[Legacy .doc requires conversion to .docx for full analysis]"
-            )
+            return (f"Legacy Word Document: {file_data.filename}\n\n"
+                   "[Legacy .doc requires conversion to .docx for full analysis]")
+        
+        # Use extractor registry
+        extractor = CONTENT_EXTRACTORS.get(file_data.mime_type)
+        if extractor:
+            content = extractor(file_data.data)
+            doc_type = file_data.mime_type.split('/')[-1].upper()
+            return f"{doc_type} Document: {file_data.filename}\n\n{content}"
+        
         return f"Document: {file_data.filename} (Type: {file_data.mime_type})\n[Unsupported type]"
     except Exception as e:
         return f"Error processing document {file_data.filename}: {e}"
@@ -263,52 +216,62 @@ def process_document_for_langchain(file_data: FileData) -> str:
 # ======================
 # Conversation assembly
 # ======================
-def build_conversation_messages(
-    history: List[APIMessage], current: ChatRequest, system_prompt: Optional[str]
-) -> List:
-    """Compose messages for LangChain models, including multimodal content."""
-    msgs: List[Any] = []
-    if system_prompt:
-        msgs.append(SystemMessage(content=system_prompt))
-
-    # Past turns
-    for msg in history:
-        if msg.role == "user":
-            content_parts: List[Dict[str, Any]] = []
-            if msg.content:
-                content_parts.append({"type": "text", "text": msg.content})
-            if getattr(msg, "files", None):
-                for f in msg.files:
-                    if f.mime_type.startswith("image/"):
-                        img = process_image_for_langchain(f)
-                        if img:
-                            content_parts.append(img)
-                    else:
-                        content_parts.append({"type": "text", "text": process_document_for_langchain(f)})
-            if content_parts:
-                if len(content_parts) == 1 and content_parts[0].get("type") == "text":
-                    msgs.append(HumanMessage(content=content_parts[0]["text"]))
-                else:
-                    msgs.append(HumanMessage(content=content_parts))
-        elif msg.role == "assistant":
-            msgs.append(AIMessage(content=msg.content))
-
-    # Current turn
-    parts: List[Dict[str, Any]] = []
-    if current.message.text:
-        parts.append({"type": "text", "text": current.message.text})
-    for f in current.message.files:
+def _process_message_files(files: List[FileData]) -> List[Dict[str, Any]]:
+    """Process files for a message into content parts."""
+    parts = []
+    for f in files:
         if f.mime_type.startswith("image/"):
             img = process_image_for_langchain(f)
             if img:
                 parts.append(img)
         else:
             parts.append({"type": "text", "text": process_document_for_langchain(f)})
-    if parts:
-        if len(parts) == 1 and parts[0].get("type") == "text":
-            msgs.append(HumanMessage(content=parts[0]["text"]))
-        else:
-            msgs.append(HumanMessage(content=parts))
+    return parts
+
+def _create_message_content(text: Optional[str], files: List[FileData]) -> List[Dict[str, Any]]:
+    """Create content parts for a message."""
+    parts = []
+    if text:
+        parts.append({"type": "text", "text": text})
+    parts.extend(_process_message_files(files))
+    return parts
+
+def _format_langchain_message(content_parts: List[Dict[str, Any]], is_user: bool):
+    """Format content parts into appropriate LangChain message."""
+    if not content_parts:
+        return None
+    
+    if len(content_parts) == 1 and content_parts[0].get("type") == "text":
+        content = content_parts[0]["text"]
+    else:
+        content = content_parts
+    
+    return HumanMessage(content=content) if is_user else AIMessage(content=content)
+
+def build_conversation_messages(
+    history: List[APIMessage], current: ChatRequest, system_prompt: Optional[str]
+) -> List:
+    """Compose messages for LangChain models, including multimodal content."""
+    msgs = []
+    if system_prompt:
+        msgs.append(SystemMessage(content=system_prompt))
+
+    # Process history
+    for msg in history:
+        if msg.role == "user":
+            content_parts = _create_message_content(msg.content, getattr(msg, "files", []))
+            message = _format_langchain_message(content_parts, is_user=True)
+            if message:
+                msgs.append(message)
+        elif msg.role == "assistant":
+            msgs.append(AIMessage(content=msg.content))
+
+    # Process current message
+    current_parts = _create_message_content(current.message.text, current.message.files)
+    current_message = _format_langchain_message(current_parts, is_user=True)
+    if current_message:
+        msgs.append(current_message)
+    
     return msgs
 
 # ===========================
@@ -380,7 +343,8 @@ def get_gemini_tools_and_policy(model_name: str, prompt: str) -> Tuple[List[Any]
             tools.append({"google_search": {}})
 
     # IMAGE directive (no function_declarations — we parse JSON ourselves)
-    if GEMINI_IMAGE_TOOL_DEFAULT != "never" or _is_forced_image(prompt):
+    # Only enable when explicitly requested to maintain streaming performance
+    if GEMINI_IMAGE_TOOL_DEFAULT == "always" or _is_forced_image(prompt):
         image_json_enabled = True
 
     policy = _gemini_policy_text(GEMINI_TOOL_MAX_QUERIES, enable_image_json=image_json_enabled)
@@ -410,13 +374,15 @@ def get_model(model_name: str):
     provider = cfg["provider"]
     model_cls = cfg["class"]
 
-    # Do NOT pass streaming=True to ChatGoogleGenerativeAI (your build rejects it).
+    # Enhanced Google/Gemini configuration for better streaming
     if provider == "google":
         return model_cls(
             model=cfg["model"],
             google_api_key=api_key,
             max_output_tokens=8192,
             temperature=0.7,
+            # Enable streaming support for better real-time responses
+            streaming=True,
         )
     else:
         return model_cls(
@@ -429,113 +395,51 @@ def get_model(model_name: str):
 # ===================
 # Image generation
 # ===================
-# def image_gen_tool(prompt: str, model_id: Optional[str] = None) -> str:
-#     """
-#     Image generation via Hugging Face Inference API.
-#     Returns a data URL (base64 PNG) or a stable placeholder URL if generation fails.
-#     """
-#     hf_token = ENV_KEYS["HUGGINGFACE_API_KEY"]
-#     if hf_token:
-#         try:
-#             client = InferenceClient(api_key=hf_token)
-#             image = client.text_to_image(
-#                 prompt,
-#                 model="ZB-Tech/Text-to-Image",
-#             )
-#             # print(f"Generated image: {image}")
-#             # Convert PIL.Image to PNG bytes
-#             buf = BytesIO()
-#             image.save(buf, format="PNG")
-#             buf.seek(0)
-#             img_bytes = buf.getvalue()
-#             # Base64-encode and return a data URL
-#             b64 = base64.b64encode(img_bytes).decode("utf-8")
-#             print(f"Generated image URL: data:image/png;base64,{b64}")
-#             open("generated_image.png", "wb").write(img_bytes)  # Save for debugging
-#             return f"data:image/png;base64,{b64}"
-#         except Exception as e:
-#             print(f"Hugging Face image generation failed: {e!r}")
-#     return "https://picsum.photos/1024"
-
-
 def image_gen_tool(prompt: str, model_id: Optional[str] = None, local_image_path: Optional[str] = None) -> str:
     """
-    Image URL provider for frontend testing.
-
+    Image URL provider with multiple modes.
+    
     Modes (set with env IMAGE_GEN_MODE):
-      - local (default): read a local PNG and return data URL (no HF hits).
-          * path comes from param `local_image_path` or env IMAGE_GEN_LOCAL_PATH
-            (defaults to "generated_image.png")
-      - hf: (kept commented out) Hugging Face generation (enable later if needed)
+      - local (default): read a local PNG and return data URL
+      - hf: Hugging Face generation (when implemented)
       - placeholder: return a static placeholder URL
-
-    Returns:
-      str: data:image/png;base64,...  (or an https placeholder if not available)
     """
-    import os
-    import base64
-    from io import BytesIO
-
-    mode = os.getenv("IMAGE_GEN_MODE", "local").strip().lower()  # local | hf | placeholder
+    mode = os.getenv("IMAGE_GEN_MODE", "local").strip().lower()
+    placeholder_url = "https://picsum.photos/1024"
 
     if mode == "local":
-        # Prefer explicit arg, then env, then default
         path = local_image_path or os.getenv("IMAGE_GEN_LOCAL_PATH", "generated_image.png")
         try:
             with open(path, "rb") as f:
                 img_bytes = f.read()
-            # Optional: write a copy for debug (just to confirm we could read)
+            # Debug copy
             with open("debug_local_image_copy.png", "wb") as dbg:
                 dbg.write(img_bytes)
             b64 = base64.b64encode(img_bytes).decode("utf-8")
-            print(f"Generated image URL: data:image/png;base64,{b64}")
             return f"data:image/png;base64,{b64}"
-        except FileNotFoundError:
-            print(f"[image_gen_tool] Local image not found at: {path!r}. Falling back to placeholder.")
-            return "https://picsum.photos/1024"
-        except Exception as e:
-            print(f"[image_gen_tool] Failed to read local image {path!r}: {e!r}. Falling back to placeholder.")
-            return "https://picsum.photos/1024"
+        except (FileNotFoundError, Exception) as e:
+            print(f"[image_gen_tool] Local image error: {e}. Using placeholder.")
+            return placeholder_url
 
     elif mode == "hf":
-        # ─────────────────────────────────────────────────────────────────────────
-        # NOTE: Hugging Face path intentionally commented out for now to save hits.
-        # To re-enable later:
-        #   1) uncomment the block below
-        #   2) ensure ENV_KEYS['HUGGINGFACE_API_KEY'] is set
-        #   3) set IMAGE_GEN_MODE=hf
-        # ─────────────────────────────────────────────────────────────────────────
         hf_token = ENV_KEYS.get("HUGGINGFACE_API_KEY")
         if not hf_token:
             print("[image_gen_tool] No HUGGINGFACE_API_KEY; using placeholder.")
-            return "https://picsum.photos/1024"
+            return placeholder_url
 
         try:
-            # from huggingface_hub import InferenceClient
+            # TODO: Implement HF generation when needed
             # client = InferenceClient(api_key=hf_token)
             # model_to_use = model_id or os.getenv("HF_TTI_MODEL", "black-forest-labs/FLUX.1-schnell")
-            #
-            # image = client.text_to_image(prompt, model=model_to_use)  # returns PIL.Image
-            #
-            # buf = BytesIO()
-            # image.save(buf, format="PNG")
-            # img_bytes = buf.getvalue()
-            #
-            # # Correct write (your old code used .read on a writable file handle)
-            # with open("generated_image.png", "wb") as fp:
-            #     fp.write(img_bytes)
-            #
-            # b64 = base64.b64encode(img_bytes).decode("utf-8")
-            # return f"data:image/png;base64,{b64}"
-            #
-            # For now, explicitly avoid making the call:
-            raise RuntimeError("HF generation disabled for testing; set IMAGE_GEN_MODE=hf and uncomment code.")
+            # image = client.text_to_image(prompt, model=model_to_use)
+            # ... conversion logic ...
+            raise RuntimeError("HF generation not implemented yet")
         except Exception as e:
-            print(f"[image_gen_tool] HF generation skipped/failed: {e!r}. Using placeholder.")
-            return "https://picsum.photos/1024"
+            print(f"[image_gen_tool] HF generation failed: {e}. Using placeholder.")
+            return placeholder_url
 
-    # Fallback / explicit placeholder mode
-    return "https://picsum.photos/1024"
+    # Fallback mode
+    return placeholder_url
 
 
 
@@ -597,55 +501,94 @@ def _extract_first_line(text: str) -> str:
 # ===================
 def my_genai_chat_function_stream(payload: ChatRequest) -> Generator[str, None, None]:
     """
-    Streaming chat generation.
-    If image JSON directive might be used, we fall back to single-shot (non-stream) to capture the directive.
+    Enhanced streaming chat generation with improved Gemini support.
+    Properly streams responses while supporting image generation when explicitly requested.
     """
     if not payload.message.text and not payload.message.files:
         yield "No message content provided."
         return
+        
     try:
+        print(f"🚀 Starting streaming for model: {payload.model_name}")
         model = get_model(payload.model_name)
         messages = build_conversation_messages(payload.history, payload, payload.system_prompt)
+        
         if not messages:
             yield "No valid content to process."
             return
 
-        tools, policy, image_json_enabled = get_gemini_tools_and_policy(payload.model_name, payload.message.text or "")
+        tools, policy, image_json_enabled = get_gemini_tools_and_policy(
+            payload.model_name, payload.message.text or ""
+        )
+        print(f"📊 Gemini config: tools={len(tools)}, policy_enabled={bool(policy)}, "
+              f"image_json_enabled={image_json_enabled}")
+        
         if policy:
             messages = _insert_policy_message(messages, policy)
 
-        # If we asked for image JSON directives, do a single non-stream call to parse it
+        # Enhanced streaming for image JSON directives
         if image_json_enabled:
-            resp = _invoke_with_optional_tools(model, messages, tools)
-            content = getattr(resp, "content", "") or ""
-            if isinstance(content, list):
-                content = " ".join(str(p) for p in content if p)
-
-            # Check for first-line JSON directive
-            first = _extract_first_line(content)
-            tool_req = _maybe_parse_tool_json(first)
-            if tool_req:
-                img_url = image_gen_tool(tool_req.get("prompt", ""), tool_req.get("model"))
-                # Compose final answer: include image and the rest of the model reply (minus the JSON line)
-                remaining = "\n".join(content.splitlines()[1:]).strip()
-                final = f"![generated]({img_url})\n\n{remaining or ''}".strip()
-                yield final or "No response from model."
-                return
-
-            # No directive; just stream the original content in one go
-            yield content or "No response from model."
+            yield from _handle_image_json_streaming(model, messages, tools)
             return
 
         # Normal streaming (no image directive expected)
-        for chunk in _stream_with_optional_tools(model, messages, tools):
-            if getattr(chunk, "content", None):
-                if isinstance(chunk.content, list):
-                    yield " ".join(str(p) for p in chunk.content if p)
-                else:
-                    yield chunk.content
+        print("⚡ Using normal streaming mode")
+        yield from _handle_normal_streaming(model, messages, tools)
+        
     except Exception as e:
         print(f"Error in LangChain stream call: {e}")
         yield f"Error generating response: {e}"
+
+
+def _handle_image_json_streaming(model, messages, tools):
+    """Handle streaming with image JSON directive detection."""
+    print("🖼️  Image JSON enabled - using enhanced streaming with directive detection")
+    
+    first_chunk_received = False
+    accumulated_content = ""
+    
+    for chunk in _stream_with_optional_tools(model, messages, tools):
+        if not getattr(chunk, "content", None):
+            continue
+            
+        chunk_content = chunk.content
+        if isinstance(chunk_content, list):
+            chunk_content = " ".join(str(p) for p in chunk_content if p)
+        
+        if not first_chunk_received:
+            first_chunk_received = True
+            accumulated_content = chunk_content
+            
+            # Check for JSON directive
+            first_line = _extract_first_line(accumulated_content)
+            tool_req = _maybe_parse_tool_json(first_line)
+            
+            if tool_req:
+                # Generate and yield image
+                img_url = image_gen_tool(tool_req.get("prompt", ""), tool_req.get("model"))
+                yield f"![generated]({img_url})\n\n"
+                
+                # Send remaining content (minus JSON line)
+                remaining_first = "\n".join(accumulated_content.splitlines()[1:]).strip()
+                if remaining_first:
+                    yield remaining_first
+            else:
+                yield chunk_content
+        else:
+            yield chunk_content
+    
+    if not first_chunk_received:
+        yield "No response from model."
+
+
+def _handle_normal_streaming(model, messages, tools):
+    """Handle normal streaming without special processing."""
+    for chunk in _stream_with_optional_tools(model, messages, tools):
+        if getattr(chunk, "content", None):
+            if isinstance(chunk.content, list):
+                yield " ".join(str(p) for p in chunk.content if p)
+            else:
+                yield chunk.content
 
 def my_genai_chat_function(payload: ChatRequest) -> str:
     """Non-streaming variant—Gemini decides search tool; image-gen via JSON directive on first line."""
