@@ -51,6 +51,8 @@ async def chat_endpoint(payload: ChatRequest):
         
         return StreamingResponse(
             generate_response(),
+
+            
             media_type="text/plain",
             headers={
                 "Cache-Control": "no-cache",

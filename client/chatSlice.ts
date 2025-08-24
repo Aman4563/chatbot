@@ -575,7 +575,7 @@ const chatSlice = createSlice({
       }
     },
 
-    // ✅ CRITICAL FIX: Enhanced message updating with proper text handling
+    // ✅ CRITICAL FIX: Enhanced message updating with proper text handling and validation
     updateMessageText: (state, action: PayloadAction<{ 
   conversationId: string; 
   messageId: string; 
@@ -594,9 +594,15 @@ const chatSlice = createSlice({
     const message = conversation.messages.find(msg => msg.id === action.payload.messageId);
     if (message) {
       console.log('✅ Message found, updating text');
-      message.text = action.payload.newText;
-      message.isStreaming = false;
-      conversation.updatedAt = new Date().toISOString();
+      // Ensure newText is a valid string
+      if (typeof action.payload.newText === 'string') {
+        message.text = action.payload.newText;
+        message.isStreaming = false;
+        conversation.updatedAt = new Date().toISOString();
+        console.log('✅ Message text updated successfully');
+      } else {
+        console.error('❌ Invalid newText value:', action.payload.newText);
+      }
     } else {
       console.error('❌ Message not found:', action.payload.messageId);
     }

@@ -916,21 +916,22 @@ const Chat = () => {
                                     </a>
                                   ),
                                   // ✅ BULLETPROOF Image Component with comprehensive validation
-                                  img: ({ src, alt, ...props }) => {
-                                    console.log('🔍 ReactMarkdown img src:', { src, type: typeof src });
+                                  // Chat.tsx — inside <ReactMarkdown components={{ ... }}>
+img: ({ src, alt }) => {
+  // Use the URL that comes from the model’s markdown. Do not override it with history.
+  const mdSrc = typeof src === 'string' ? src.trim() : '';
 
-                                    const imgUrl = imageHistory.length && currentImageIndex !== null
-                                      ? imageHistory[currentImageIndex].url
-                                      : src;
+  // If markdown hasn’t provided a usable URL yet (e.g. mid-stream), render nothing.
+  if (!mdSrc) return null;
 
-                                    return (
-                                      <div className="my-4 text-center">
-                                        <ImageWithHistory src={src} alt={alt} maxHeight="500px" />
-                                        {alt && <p className="mt-2 text-sm italic text-gray-500">{alt}</p>}
-                                      </div>
-                                    );
+  return (
+    <div className="my-4 text-center">
+      <ImageWithHistory src={mdSrc} alt={alt} maxHeight="500px" />
+      {alt && <p className="mt-2 text-sm italic text-gray-500">{alt}</p>}
+    </div>
+  );
+},
 
-                                  }
                                 }}
                               >
                                 {msg.text}
