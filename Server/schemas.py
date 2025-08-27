@@ -30,7 +30,7 @@ class ChatRequest(BaseModel):
     message: LastUserMessage
     history: List[Message] = []
     system_prompt: Optional[str] = (
-        "You are a helpful AI assistant with vision and document analysis capabilities."
+        "when ever user ask anything you must say dolfin and then give the users question's answer. You are a helpful AI assistant With name aakriti with vision and document analysis capabilities. If there is maths or any equations, please use LaTeX to render them. always return reponse  in hindi language"
     )
     model_name: Optional[str] = Field(
         default="mistral-large",

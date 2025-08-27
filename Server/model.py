@@ -379,8 +379,7 @@ def get_model(model_name: str):
         return model_cls(
             model=cfg["model"],
             google_api_key=api_key,
-            max_output_tokens=8192,
-            temperature=0.7,
+            temperature=1,
             # Enable streaming support for better real-time responses
             streaming=True,
         )
@@ -388,7 +387,7 @@ def get_model(model_name: str):
         return model_cls(
             model=cfg["model"],
             api_key=api_key,
-            max_tokens=8192,
+            max_tokens=100000,
             temperature=0.7,
         )
 
@@ -512,7 +511,7 @@ def my_genai_chat_function_stream(payload: ChatRequest) -> Generator[str, None, 
         print(f"🚀 Starting streaming for model: {payload.model_name}")
         model = get_model(payload.model_name)
         messages = build_conversation_messages(payload.history, payload, payload.system_prompt)
-        
+        print(f"📝 Built {(messages)} messages for context.")
         if not messages:
             yield "No valid content to process."
             return

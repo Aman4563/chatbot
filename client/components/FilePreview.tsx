@@ -19,7 +19,7 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemoveFile })
           <img
             src={file.url || `data:${file.mime_type};base64,${file.data}`}
             alt={file.filename}
-            className="w-16 h-16 rounded-xl object-cover border border-gray-200 shadow-sm"
+            className="w-16 h-16 rounded-xl object-cover border border-gray-200 dark:border-gray-700 shadow-sm"
           />
           <button
             onClick={() => onRemoveFile(index)}
@@ -31,14 +31,14 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemoveFile })
       );
     } else {
       return (
-        <div key={index} className="inline-flex items-center gap-2 m-1 px-3 py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-sm relative group transition-all duration-200">
-          <div className="flex items-center gap-2 text-gray-700">
+        <div key={index} className="inline-flex items-center gap-2 m-1 px-3 py-2 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 rounded-xl text-sm relative group transition-all duration-200">
+          <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
             <FileIcon mimeType={file.mime_type} />
             <span className="truncate max-w-32 font-medium">{file.filename}</span>
           </div>
           <button
             onClick={() => onRemoveFile(index)}
-            className="ml-2 text-red-500 hover:text-red-700 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+            className="ml-2 text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors duration-200 opacity-0 group-hover:opacity-100"
           >
             <X className="w-4 h-4" />
           </button>
@@ -48,11 +48,11 @@ export const FilePreview: React.FC<FilePreviewProps> = ({ files, onRemoveFile })
   };
 
   return (
-    <div className="bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-lg">
+    <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm border-t border-gray-200 dark:border-gray-700 shadow-lg">
       <div className="max-w-4xl mx-auto px-6 py-4">
-        <div className="flex items-center gap-3 text-sm text-gray-600 mb-4">
-          <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-            <Paperclip className="w-4 h-4 text-blue-600" />
+        <div className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400 mb-4">
+          <div className="w-8 h-8 bg-blue-100 dark:bg-blue-900/40 rounded-lg flex items-center justify-center">
+            <Paperclip className="w-4 h-4 text-blue-600 dark:text-blue-400" />
           </div>
           <span className="font-semibold">Selected files ({files.length}):</span>
         </div>

@@ -11,6 +11,7 @@ import { FilePreview } from '../components/FilePreview';
 import { ErrorDisplay } from '../components/ErrorDisplay';
 import { DragOverlay } from '../components/DragOverlay';
 import { EmptyState } from '../components/EmptyState';
+import { Settings } from '../components/Settings';
 
 // Custom hooks
 import { useChatHandlers } from '../hooks/useChatHandlers';
@@ -38,6 +39,7 @@ const Chat: React.FC = () => {
   const [collapsedBlocks, setCollapsedBlocks] = useState<Set<string>>(new Set());
   const [copiedChat, setCopiedChat] = useState(false);
   const [activeTool, setActiveTool] = useState<'chat' | 'search' | 'image'>('chat');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -104,7 +106,7 @@ const Chat: React.FC = () => {
 
   const activeConversation = conversations.find(conv => conv.id === activeConversationId);
 
-  // Handle tool actions
+  // Handle tool action based on active tool
   const handleToolAction = () => {
     switch (activeTool) {
       case 'search':
@@ -142,8 +144,8 @@ const Chat: React.FC = () => {
 
   return (
     <div
-      className={`flex-1 flex flex-col h-full w-full bg-gradient-to-br from-gray-50 via-white to-blue-50/30 relative transition-all duration-300 ${
-        dragOver ? 'bg-gradient-to-br from-blue-100 via-blue-50 to-indigo-100' : ''
+      className={`flex-1 flex flex-col h-full w-full bg-gradient-to-br from-gray-50 via-white to-blue-50/30 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 relative transition-all duration-300 ${
+        dragOver ? 'bg-gradient-to-br from-blue-100 via-blue-50 to-indigo-100 dark:from-blue-900 dark:via-blue-800 dark:to-indigo-900' : ''
         }`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
@@ -158,6 +160,7 @@ const Chat: React.FC = () => {
         activeConversation={activeConversation}
         copiedChat={copiedChat}
         onCopyChat={copyChatAsMarkdown}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* Messages Area */}
@@ -206,6 +209,9 @@ const Chat: React.FC = () => {
         onSend={handleToolAction}
         onFileUpload={() => fileInputRef.current?.click()}
       />
+
+      {/* Settings Modal */}
+      <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 };

@@ -1,15 +1,12 @@
-import React, { RefObject } from 'react';
-import 'highlight.js/styles/atom-one-dark.css';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  ChevronDown, 
-  Copy, 
-  Check, 
-  Edit3, 
-  RotateCcw, 
-  User, 
-  Bot, 
+import React, { RefObject, useEffect, useMemo, useState } from 'react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  Edit3,
+  RotateCcw,
+  User,
+  Bot,
   MessageCircle,
   X,
   FileText,
@@ -17,109 +14,424 @@ import {
 } from 'lucide-react';
 import { Conversation, Message, FileData } from '../chatSlice';
 import { CHAT_CONSTANTS } from '../constants/chatConstants';
-import { MarkdownRenderer } from './shared/MarkdownRenderer';
+// import { MarkdownRenderer } from './shared/MarkdownRenderer';
 import { FileIcon } from './shared/FileIcon';
+import { Streamdown } from 'streamdown';
+
+import { codeToHtml } from "shiki";
+import {
+  transformerNotationDiff,
+  transformerNotationHighlight,
+  transformerNotationFocus,
+  transformerMetaHighlight,
+} from "@shikijs/transformers";
+import { LLMCodeBlock } from "./shared/LLMCodeBlock";
+
+
+
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+
+// If you use images in markdown, keep your original helper. Adjust the path if needed.
+import { ImageWithHistory } from '.././Component/ImageWithHistory';
+
+/* ───────────────────────── helpers ───────────────────────── */
+
+// stable (deterministic) id for a code block based on its contents
+function hashString(input: string) {
+  let h = 0;
+  for (let i = 0; i < input.length; i++) {
+    h = (h << 5) - h + input.charCodeAt(i);
+    h |= 0;
+  }
+  return `code-${Math.abs(h)}`;
+}
+
+// Extract plain text out of any React children tree
+function extractText(node: any): string {
+  if (node == null) return '';
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (React.isValidElement(node)) return extractText((node as any).props?.children);
+  return '';
+}
+
+
+// function CodeBlock({ className, children }: any) {
+//   const lang = className?.replace("language-", "") || "txt";
+//   const code = String(children ?? "");
+//   const [html, setHtml] = useState<string>("");
+
+//   useEffect(() => {
+//     codeToHtml(code, {
+//       lang,
+//       theme: "github-dark",
+//       transformers: [transformerNotationDiff(), transformerMetaHighlight()],
+//     }).then(setHtml);
+//   }, [code, lang]);
+
+//   return <div dangerouslySetInnerHTML={{ __html: html }} />;
+// }
+
+
+// Call this on the streamed markdown before rendering
+// lib/normalizeFences.ts
+export function normalizeFences(md: string) {
+  const lines = md.split(/\r?\n/);
+  let open = false;
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    const isFence = /^`{3,}/.test(t);
+    if (isFence) {
+      if (open) {
+        out.push(lines[i]);
+        open = false;
+        // Drop an immediate duplicate closing fence (common LLM artifact)
+        if (i + 1 < lines.length && /^`{3,}$/.test(lines[i + 1].trim())) i++;
+      } else {
+        open = true;
+        out.push(lines[i]);
+      }
+      continue;
+    }
+    out.push(lines[i]);
+  }
+  return out.join("\n");
+}
+
+
+
+
+/**
+ * Auto-convert common “plain text” math to LaTeX so KaTeX renders it nicely.
+ * This is intentionally conservative and targets the exact shapes from your screenshots:
+ *  - σ(x) = 1 / (1 + e<sup>-x</sup>)
+ *  - f(x) = (1 / (σ√(2π))) * e^(-((x - μ)² / (2σ²)))
+ *
+ * Notes:
+ *  - We skip code blocks.
+ *  - We won’t wrap anything that already contains $…$ or $$…$$.
+ */
+function autoMathify(markdown: string): string {
+  // split on fenced code blocks to avoid touching code
+  const parts = markdown.split(/(```[\s\S]*?```)/g);
+  return parts
+    .map((chunk, i) => {
+      // Leave fenced code blocks untouched (odd indices are the fences due to the split)
+      if (i % 2 === 1) return chunk;
+
+      // Work line-by-line for simple, safe replacements
+      const lines = chunk.split('\n').map((line) => {
+        const alreadyLaTeX = /\$(.|[\r\n])*\$/.test(line) || /\$\$/.test(line);
+        if (alreadyLaTeX) return line;
+
+        let out = line;
+
+        // HTML <sup> → LaTeX superscripts
+        out = out.replace(/<sup>(.*?)<\/sup>/gi, '^{$1}');
+
+        // Common unicode superscripts (², ³)
+        out = out.replace(/([A-Za-z0-9)\]}])²/g, '$1^{2}');
+        out = out.replace(/([A-Za-z0-9)\]}])³/g, '$1^{3}');
+
+        // sqrt: √( … ) -> \sqrt{ … }
+        out = out.replace(/√\(([^)]+)\)/g, '\\sqrt{$1}');
+
+        // Greek letters → LaTeX macros
+        out = out.replace(/σ/g, '\\sigma');
+        out = out.replace(/μ/g, '\\mu');
+        out = out.replace(/π/g, '\\pi');
+
+        // e^(...) and e^-x shapes → e^{...}
+        out = out.replace(/e\^\(([^)]+)\)/g, 'e^{$1}');
+        out = out.replace(/e\^(-?[A-Za-z0-9+/*\s._-]+)/g, (m, p1) => `e^{${p1.trim()}}`);
+
+        // fraction: 1 / ( ... )  →  \frac{1}{ ... }
+        out = out.replace(/(^|[^\\])1\s*\/\s*\(([^)]+)\)/g, (_m, pfx, inside) => `${pfx}\\frac{1}{${inside}}`);
+
+        // If the line *looks* like a formula, wrap it in $…$
+        const looksLikeFormula =
+          /\\(sigma|mu|pi|sqrt|frac)|e\^{|=/.test(out) &&
+          out.trim().length > 0;
+
+        if (looksLikeFormula) {
+          // Don't double-wrap if we already inserted $ earlier
+          if (!/^\s*\$.*\$\s*$/.test(out)) out = `$${out}$`;
+        }
+
+        return out;
+      });
+
+      return lines.join('\n');
+    })
+    .join('');
+}
+
+/* ──────────────────────── UI primitives ─────────────────────── */
+
+// const InlineCode = ({ children, ...props }: any) => (
+//   <code
+//     className="rounded px-1.5 py-0.5 font-mono text-[0.9em] bg-slate-200/70 text-slate-800"
+//     {...props}
+//   >
+//     {children}
+//   </code>
+// );
+
+/**
+ * Dark themed <pre> wrapper that preserves Streamdown/Shiki HTML:
+ *  • Language badge + line count
+ *  • Copy button
+ *  • Collapse/expand for long blocks with bottom fade
+ */
+// const PreBlock: React.FC<React.HTMLAttributes<HTMLPreElement>> = (props) => {
+//   // Expect <pre><code class="language-xxx">…</code></pre>
+//   const onlyChild = React.Children.only(props.children) as React.ReactElement<any>;
+//   const className: string | undefined = onlyChild?.props?.className;
+//   const language =
+//     (className?.match(/language-([a-z0-9+#.-]+)/i)?.[1] ?? 'code').toLowerCase();
+
+//   const raw = onlyChild?.props?.children;
+//   const codeText = useMemo(() => extractText(raw).replace(/\n$/, ''), [raw]);
+//   const lines = useMemo(() => codeText.split('\n'), [codeText]);
+//   const blockId = useMemo(() => hashString(codeText), [codeText]);
+
+//   const COLLAPSE_THRESHOLD = 14;
+//   const [collapsed, setCollapsed] = useState(false);
+//   const [copied, setCopied] = useState(false);
+
+//   useEffect(() => {
+//     setCollapsed(lines.length > COLLAPSE_THRESHOLD);
+//     // eslint-disable-next-line react-hooks/exhaustive-deps
+//   }, [blockId]);
+
+//   const onCopy = async () => {
+//     try {
+//       await navigator.clipboard.writeText(codeText);
+//       setCopied(true);
+//       setTimeout(() => setCopied(false), 1100);
+//     } catch {}
+//   };
+
+//   return (
+//     <div className="my-4 overflow-hidden rounded-xl border border-slate-700/60 bg-[#0b1220] shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+//       {/* Header */}
+//       <div className="flex items-center justify-between border-b border-slate-700/60 bg-[#0f172a] px-3 py-2.5">
+//         <div className="flex items-center gap-3">
+//           {lines.length > COLLAPSE_THRESHOLD && (
+//             <button
+//               onClick={() => setCollapsed((v) => !v)}
+//               className="rounded p-1 text-slate-300/80 hover:bg-slate-800/50 hover:text-slate-100 transition"
+//               title={collapsed ? 'Expand code' : 'Collapse code'}
+//               aria-label={collapsed ? 'Expand code' : 'Collapse code'}
+//             >
+//               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor">
+//                 {collapsed ? (
+//                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+//                 ) : (
+//                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+//                 )}
+//               </svg>
+//             </button>
+//           )}
+
+//           <span className="rounded-md bg-slate-800/70 px-2 py-0.5 text-xs font-semibold capitalize text-slate-100">
+//             {language}
+//           </span>
+//           <span className="text-xs text-slate-400">
+//             {lines.length} line{lines.length !== 1 ? 's' : ''}
+//           </span>
+//         </div>
+
+//         <button
+//           onClick={onCopy}
+//           className="rounded-md border border-slate-600 bg-slate-800/50 px-2 py-1 text-xs font-medium text-slate-100 hover:bg-slate-700/70 active:scale-[0.99] transition"
+//           title="Copy code"
+//         >
+//           {copied ? 'Copied!' : 'Copy'}
+//         </button>
+//       </div>
+
+//       {/* Body */}
+//       <div className={`relative ${collapsed ? 'max-h-72 overflow-hidden' : ''}`}>
+//         {/* IMPORTANT: don’t override the inner <code> — Streamdown/Shiki injects the colored spans there */}
+//         <pre className="m-0 max-h-[70vh] overflow-x-auto p-4 text-[13px] leading-relaxed font-mono text-slate-200 bg-transparent">
+//           {onlyChild}
+//         </pre>
+
+//         {collapsed && (
+//           <>
+//             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#0b1220] to-transparent" />
+//             <div className="flex justify-center pb-3">
+//               <button
+//                 onClick={() => setCollapsed(false)}
+//                 className="relative z-10 -mt-6 rounded-lg border border-slate-600 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-100 shadow-sm hover:bg-slate-700"
+//               >
+//                 Show more
+//               </button>
+//             </div>
+//           </>
+//         )}
+//       </div>
+//     </div>
+//   );
+// };
+
+/* ───────────── component map (don’t override block <code>) ───────────── */
+
+// export const createMarkdownComponents = () => ({
+//   pre: PreBlock,
+
+//   // Do NOT override block <code>; let Streamdown/Shiki render it.
+//   // Style inline <code> with a small chip via CSS or the fragment below.
+//   code: ({ inline, children, ...rest }: any) =>
+//     inline ? (
+//       <InlineCode {...rest}>{children}</InlineCode>
+//     ) : (
+//       // return default element; don’t touch Shiki output
+//       <code {...rest}>{children}</code>
+//     ),
+
+//   /* Typography & elements */
+//   p: ({ children, ...props }: any) => (
+//     <p className="mb-3 last:mb-0 leading-relaxed text-slate-800" {...props}>
+//       {children}
+//     </p>
+//   ),
+//   ul: ({ children, ...props }: any) => (
+//     <ul className="mb-3 ml-5 list-disc space-y-1 text-slate-800" {...props}>
+//       {children}
+//     </ul>
+//   ),
+//   ol: ({ children, ...props }: any) => (
+//     <ol className="mb-3 ml-5 list-decimal space-y-1 text-slate-800" {...props}>
+//       {children}
+//     </ol>
+//   ),
+//   li: ({ children, ...props }: any) => (
+//     <li className="leading-relaxed text-slate-800" {...props}>
+//       {children}
+//     </li>
+//   ),
+//   blockquote: ({ children, ...props }: any) => (
+//     <blockquote
+//       className="my-3 rounded-r border-l-4 border-slate-300 bg-slate-50/60 pl-4 italic text-slate-700"
+//       {...props}
+//     >
+//       {children}
+//     </blockquote>
+//   ),
+//   h1: ({ children, ...props }: any) => (
+//     <h1 className="mb-3 border-b border-slate-200 pb-1 text-xl font-bold text-slate-900" {...props}>
+//       {children}
+//     </h1>
+//   ),
+//   h2: ({ children, ...props }: any) => (
+//     <h2 className="mb-2 text-lg font-bold text-slate-900" {...props}>
+//       {children}
+//     </h2>
+//   ),
+//   h3: ({ children, ...props }: any) => (
+//     <h3 className="mb-2 text-base font-semibold text-slate-900" {...props}>
+//       {children}
+//     </h3>
+//   ),
+//   h4: ({ children, ...props }: any) => (
+//     <h4 className="mb-1 text-sm font-semibold text-slate-900" {...props}>
+//       {children}
+//     </h4>
+//   ),
+//   strong: ({ children, ...props }: any) => (
+//     <strong className="font-semibold text-slate-900" {...props}>
+//       {children}
+//     </strong>
+//   ),
+//   em: ({ children, ...props }: any) => (
+//     <em className="italic text-slate-800" {...props}>
+//       {children}
+//     </em>
+//   ),
+//   table: ({ children, ...props }: any) => (
+//     <div className="my-3 overflow-x-auto">
+//       <table className="min-w-full overflow-hidden rounded border border-slate-300 text-sm" {...props}>
+//         {children}
+//       </table>
+//     </div>
+//   ),
+//   thead: ({ children, ...props }: any) => (
+//     <thead className="bg-slate-100" {...props}>
+//       {children}
+//     </thead>
+//   ),
+//   tbody: ({ children, ...props }: any) => <tbody className="bg-white" {...props}>{children}</tbody>,
+//   tr: ({ children, ...props }: any) => (
+//     <tr className="border-b border-slate-200" {...props}>
+//       {children}
+//     </tr>
+//   ),
+//   th: ({ children, ...props }: any) => (
+//     <th className="border-r border-slate-200 px-3 py-2 text-left font-semibold text-slate-900 last:border-r-0" {...props}>
+//       {children}
+//     </th>
+//   ),
+//   td: ({ children, ...props }: any) => (
+//     <td className="border-r border-slate-200 px-3 py-2 text-slate-800 last:border-r-0" {...props}>
+//       {children}
+//     </td>
+//   ),
+//   a: ({ href, children, ...props }: any) => (
+//     <a
+//       href={href}
+//       target="_blank"
+//       rel="noopener noreferrer"
+//       className="underline decoration-slate-400 underline-offset-2 text-blue-700 hover:text-blue-900"
+//       {...props}
+//     >
+//       {children}
+//     </a>
+//   ),
+//   img: ({ src, alt }: any) => {
+//     const mdSrc = typeof src === 'string' ? src.trim() : '';
+//     if (!mdSrc) return null;
+//     return (
+//       <div className="my-4 text-center">
+//         <ImageWithHistory src={mdSrc} alt={alt} maxHeight="500px" />
+//         {alt && <p className="mt-2 text-sm italic text-slate-500">{alt}</p>}
+//       </div>
+//     );
+//   },
+// });
+
+
+
+
+
+
+
 
 interface ChatMessagesProps {
   activeConversation: Conversation;
   isLoading: boolean;
-  collapsedBlocks: Set<string>;
-  copiedCode: string;
+  collapsedBlocks: Set<string>; // kept for prop compatibility (unused)
+  copiedCode: string;           // kept for prop compatibility (unused)
   onNavigateUserEdit: (messageId: string, direction: 'prev' | 'next') => void;
   onNavigateResponse: (messageId: string, direction: 'prev' | 'next') => void;
   onRegenerateResponse: (messageId: string) => void;
-  onToggleCodeBlock: (blockId: string) => void;
-  onCopyCode: (text: string, blockId: string) => void;
+  onToggleCodeBlock: (blockId: string) => void;                // kept for prop compatibility (unused)
+  onCopyCode: (text: string, blockId: string) => void;         // kept for prop compatibility (unused)
   onToggleEdit: (messageId: string) => void;
   onRegenerateFromMessage: (messageId: string, newText: string, files: FileData[]) => void;
   messagesEndRef: RefObject<HTMLDivElement>;
 }
 
-
-
-// Code block component
-const CodeBlock = ({ 
-  className, 
-  children, 
-  onToggleCodeBlock, 
-  onCopyCode, 
-  collapsedBlocks, 
-  copiedCode 
-}: any) => {
-  const code = String(children).replace(/\n$/, '');
-  const language = className?.replace(/language-/, '') || 'text';
-  const blockId = `code-${Math.random().toString(36).substr(2, 9)}`;
-  const isCollapsed = collapsedBlocks.has(blockId);
-  const lines = code.split('\n');
-  const shouldShowCollapse = lines.length > CHAT_CONSTANTS.CODE_COLLAPSE_THRESHOLD;
-
-  return (
-    <div className="my-4 rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-white">
-      <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
-        <div className="flex items-center gap-3">
-          {shouldShowCollapse && (
-            <button
-              onClick={() => onToggleCodeBlock(blockId)}
-              className="text-gray-500 hover:text-gray-700 transition-colors p-1 rounded hover:bg-gray-200"
-              title={isCollapsed ? "Expand code" : "Collapse code"}
-            >
-              {isCollapsed ? (
-                <ChevronRight className="w-4 h-4" />
-              ) : (
-                <ChevronDown className="w-4 h-4" />
-              )}
-            </button>
-          )}
-          <span className="text-gray-600 text-sm font-medium capitalize">
-            {language === 'text' ? 'Code' : language}
-          </span>
-          <span className="text-gray-500 text-xs">
-            {lines.length} line{lines.length !== 1 ? 's' : ''}
-          </span>
-        </div>
-        <button
-          onClick={() => onCopyCode(code, blockId)}
-          className="flex items-center gap-2 px-2.5 py-1 bg-white hover:bg-gray-100 text-gray-600 text-sm rounded border border-gray-300 transition-all duration-200"
-          title="Copy code"
-        >
-          {copiedCode === blockId ? (
-            <>
-              <Check className="w-3.5 h-3.5" />
-              <span>Copied</span>
-            </>
-          ) : (
-            <>
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy</span>
-            </>
-          )}
-        </button>
-      </div>
-
-      {!isCollapsed && (
-        <div className="relative">
-          <pre className="bg-gray-900 text-gray-100 p-4 overflow-x-auto text-sm font-mono leading-relaxed custom-scrollbar max-h-96 overflow-y-auto">
-            <code className={`language-${language}`}>
-              {children}
-            </code>
-          </pre>
-        </div>
-      )}
-
-      {isCollapsed && (
-        <div className="bg-gray-50 px-4 py-3 text-sm text-gray-600">
-          <span className="italic">Code block collapsed ({lines.length} lines)</span>
-        </div>
-      )}
-    </div>
-  );
-};
-
 // Editable message component
-const EditableMessage = ({ 
-  msg, 
-  onSave, 
-  onCancel 
+const EditableMessage = ({
+  msg,
+  onSave,
+  onCancel
 }: {
   msg: Message;
   onSave: (text: string) => void;
@@ -145,38 +457,38 @@ const EditableMessage = ({
   return (
     <div className="space-y-3">
       {/* Edit Form */}
-      <div className="bg-white/95 backdrop-blur-sm rounded-lg p-4 border border-gray-200 shadow-sm">
+      <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg p-4 border border-gray-200 dark:border-gray-700 shadow-sm">
         <textarea
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full p-3 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 bg-white shadow-sm transition-all duration-200"
+          className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 shadow-sm transition-all duration-200"
           rows={Math.max(2, editText.split('\n').length)}
           autoFocus
           placeholder="Type your message..."
         />
       </div>
-      
+
       {/* Action Bar */}
       <div className="flex justify-center">
-        <div className="flex items-center gap-1 bg-white/95 backdrop-blur-sm rounded-lg px-2 py-1 shadow-sm border border-gray-200/50">
+        <div className="flex items-center gap-1 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg px-2 py-1 shadow-sm border border-gray-200/50 dark:border-gray-700/50">
           <button
             onClick={onCancel}
-            className="p-1.5 hover:bg-gray-100 rounded-md transition-colors group" 
+            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors group"
             title="Cancel editing"
           >
-            <X className="w-4 h-4 text-gray-500 group-hover:text-gray-700" />
+            <X className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
           </button>
-          
-          <div className="w-px h-4 bg-gray-300 mx-1"></div>
-          
+
+          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+
           <button
             onClick={handleSave}
-            className="p-1.5 hover:bg-green-100 rounded-md transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
+            className="p-1.5 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-md transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
             disabled={!editText.trim()}
             title="Save & regenerate"
           >
-            <Check className="w-4 h-4 text-gray-500 group-hover:text-green-600" />
+            <Check className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400" />
           </button>
         </div>
       </div>
@@ -201,7 +513,10 @@ const MessageFilePreview = ({ file, index }: { file: FileData; index: number }) 
     );
   } else {
     return (
-      <div key={index} className="inline-flex items-center gap-1 sm:gap-2 m-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-xs sm:text-sm transition-all duration-200">
+      <div
+        key={index}
+        className="inline-flex items-center gap-1 sm:gap-2 m-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-xs sm:text-sm transition-all duration-200"
+      >
         <div className="flex items-center gap-1 sm:gap-2 text-gray-700">
           <FileIcon mimeType={file.mime_type} className="w-3 h-3 sm:w-4 sm:h-4" />
           <span className="truncate max-w-20 sm:max-w-32 font-medium">{file.filename}</span>
@@ -211,7 +526,7 @@ const MessageFilePreview = ({ file, index }: { file: FileData; index: number }) 
   }
 };
 
-// Enhanced typing indicator component
+// Typing indicator
 const TypingIndicator = () => {
   return (
     <div className="flex items-center space-x-2 py-3">
@@ -225,21 +540,30 @@ const TypingIndicator = () => {
   );
 };
 
-// Enhanced streaming text component with smooth updates
+// Streaming text wrapper
 const StreamingText = ({ text, isComplete }: { text: string; isComplete: boolean }) => {
-  return <MarkdownRenderer isStreaming={!isComplete}>{text}</MarkdownRenderer>;
+  const content = useMemo(() => autoMathify(text), [text]);
+  return <Streamdown
+  parseIncompleteMarkdown={true}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        // Ensure Shiki uses a dark theme so tokens pop on our dark pre background
+        shikiTheme={["github-dark", "github-dark"]}
+        components={{ code: LLMCodeBlock as any  }}
+
+  >{normalizeFences(content)}</Streamdown>;
 };
 
 export const ChatMessages: React.FC<ChatMessagesProps> = ({
   activeConversation,
   isLoading,
-  collapsedBlocks,
-  copiedCode,
+  collapsedBlocks, // unused
+  copiedCode,      // unused
   onNavigateUserEdit,
   onNavigateResponse,
   onRegenerateResponse,
-  onToggleCodeBlock,
-  onCopyCode,
+  onToggleCodeBlock, // unused
+  onCopyCode,        // unused
   onToggleEdit,
   onRegenerateFromMessage,
   messagesEndRef
@@ -259,8 +583,9 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
               Welcome to Xbot!
             </h4>
             <p className="text-gray-600 mb-6 sm:mb-8 text-base sm:text-lg leading-relaxed max-w-xl mx-auto px-4">
-              Your intelligent AI assistant powered by multiple advanced language models. 
-              <br />Ready to help with questions, analysis, creativity, and more.
+              Your intelligent AI assistant powered by multiple advanced language models.
+              <br />
+              Ready to help with questions, analysis, creativity, and more.
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 max-w-2xl mx-auto mb-6 sm:mb-8 px-4">
               <div className="group p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl border border-blue-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
@@ -288,171 +613,180 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                 <span className="text-orange-800 text-xs sm:text-sm font-semibold">Analysis</span>
               </div>
             </div>
-            <p className="text-sm text-gray-500">
-              💡 Try asking questions, uploading files, or generating images
-            </p>
+            <p className="text-sm text-gray-500">💡 Try asking questions, uploading files, or generating images</p>
           </div>
         )}
 
         {activeConversation.messages.map((msg, idx) => (
           <div key={msg.id || idx} className={`mb-4 sm:mb-6 ${msg.sender === 'User' ? 'group' : ''}`}>
             <div className={`flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex gap-2 sm:gap-3 md:gap-4 ${msg.sender === 'User' ? 'max-w-sm sm:max-w-md md:max-w-lg' : 'max-w-full sm:max-w-3xl lg:max-w-4xl'} ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}>
-              {/* Avatar */}
-              <div className={`
+              <div
+                className={`flex gap-2 sm:gap-3 md:gap-4 ${
+                  msg.sender === 'User' ? 'max-w-sm sm:max-w-md md:max-w-lg' : 'max-w-full sm:max-w-3xl lg:max-w-4xl'
+                } ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}
+              >
+                {/* Avatar */}
+                <div
+                  className={`
                 w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-2xl flex items-center justify-center flex-shrink-0 mt-1 shadow-lg ring-2 ring-white
                 ${msg.sender === 'User'
-                  ? 'bg-gradient-to-br from-green-500 to-emerald-600'
-                  : 'bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600'
-                }
-              `}>
-                {msg.sender === 'User' ? (
-                  <User className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                ) : (
-                  <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-                )}
-              </div>
+                    ? 'bg-gradient-to-br from-green-500 to-emerald-600'
+                    : 'bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600'
+                  }
+              `}
+                >
+                  {msg.sender === 'User' ? (
+                    <User className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  ) : (
+                    <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+                  )}
+                </div>
 
-              {/* Message Content */}
-              <div className={`
+                {/* Message Content */}
+                <div
+                  className={`
                 px-3 sm:px-4 md:px-5 py-3 sm:py-4 rounded-2xl shadow-lg border backdrop-blur-sm relative group transition-all duration-200 hover:shadow-xl
                 ${msg.sender === 'User'
-                  ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20 flex-shrink'
-                  : 'bg-white/95 text-gray-800 border-gray-200/50 hover:bg-white flex-1'
-                }
+                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20 flex-shrink'
+                    : 'bg-white/95 dark:bg-gray-800/95 text-gray-800 dark:text-gray-200 border-gray-200/50 dark:border-gray-700/50 hover:bg-white dark:hover:bg-gray-800 flex-1'
+                  }
                 ${msg.sender === 'User' ? 'rounded-tr-lg' : 'rounded-tl-lg'}
-              `}>
-                {/* Bot Action buttons - only for bot messages */}
-                {msg.sender === 'Bot' && (
-                  <div className="absolute top-1 sm:top-2 right-1 sm:right-2 flex items-center space-x-1 sm:space-x-2 opacity-0 group-hover:opacity-100 transition-all duration-300">
+              `}
+                >
+                  {/* Bot Action buttons - only for bot messages */}
+                  {msg.sender === 'Bot' && (
+                    <div className="absolute top-1 sm:top-2 right-1 sm:right-2 flex items-center space-x-1 sm:space-x-2 opacity-0 group-hover:opacity-100 transition-all duration-300">
+                      {/* Bot message navigation and regenerate buttons */}
+                      {!msg.isStreaming && !isLoading && (
+                        <>
+                          {msg.responses && msg.responses.length > 1 && (
+                            <div className="flex items-center gap-1 bg-white/90 dark:bg-gray-800/90 rounded-lg p-0.5 sm:p-1 shadow-sm border border-gray-200 dark:border-gray-700">
+                              <button
+                                onClick={() => onNavigateResponse(msg.id, 'prev')}
+                                disabled={(msg.currentResponseIndex || 0) === 0}
+                                className="p-0.5 sm:p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title="Previous response"
+                              >
+                                <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-400" />
+                              </button>
 
-                    {/* Bot message navigation and regenerate buttons */}
-                    {!msg.isStreaming && !isLoading && (
-                      <>
-                        {msg.responses && msg.responses.length > 1 && (
-                          <div className="flex items-center gap-1 bg-white/90 rounded-lg p-0.5 sm:p-1 shadow-sm border border-gray-200">
-                            <button
-                              onClick={() => onNavigateResponse(msg.id, 'prev')}
-                              disabled={(msg.currentResponseIndex || 0) === 0}
-                              className="p-0.5 sm:p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              title="Previous response"
-                            >
-                              <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
-                            </button>
+                              <span className="text-xs text-gray-500 dark:text-gray-400 px-1 sm:px-2 font-medium">
+                                {(msg.currentResponseIndex || 0) + 1} / {msg.responses.length}
+                              </span>
 
-                            <span className="text-xs text-gray-500 px-1 sm:px-2 font-medium">
-                              {(msg.currentResponseIndex || 0) + 1} / {msg.responses.length}
-                            </span>
+                              <button
+                                onClick={() => onNavigateResponse(msg.id, 'next')}
+                                disabled={(msg.currentResponseIndex || 0) === (msg.responses?.length || 1) - 1}
+                                className="p-0.5 sm:p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                title="Next response"
+                              >
+                                <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-400" />
+                              </button>
+                            </div>
+                          )}
 
-                            <button
-                              onClick={() => onNavigateResponse(msg.id, 'next')}
-                              disabled={(msg.currentResponseIndex || 0) === (msg.responses?.length || 1) - 1}
-                              className="p-0.5 sm:p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              title="Next response"
-                            >
-                              <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
-                            </button>
-                          </div>
-                        )}
+                          <button
+                            onClick={() => onRegenerateResponse(msg.id)}
+                            className="p-1 sm:p-1.5 bg-white/90 dark:bg-gray-800/90 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 transition-all duration-200"
+                            title="Regenerate response"
+                          >
+                            <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-400" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
 
-                        <button
-                          onClick={() => onRegenerateResponse(msg.id)}
-                          className="p-1 sm:p-1.5 bg-white/90 hover:bg-gray-100 rounded-lg shadow-sm border border-gray-200 transition-all duration-200"
-                          title="Regenerate response"
-                        >
-                          <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
+                  {/* Message content rendering */}
+                  {msg.isEditing ? (
+                    <EditableMessage
+                      msg={msg}
+                      onSave={(newText) => {
+                        onRegenerateFromMessage(msg.id, newText, msg.files || []);
+                      }}
+                      onCancel={() => onToggleEdit(msg.id)}
+                    />
+                  ) : (
+                    <>
+                      {/* typing indicator for just-started streams */}
+                      {msg.sender === 'Bot' && msg.isStreaming && !msg.text && <TypingIndicator />}
 
-                {/* Message content rendering */}
-                {msg.isEditing ? (
-                  <EditableMessage
-                    msg={msg}
-                    onSave={(newText) => {
-                      onRegenerateFromMessage(msg.id, newText, msg.files || []);
-                    }}
-                    onCancel={() => onToggleEdit(msg.id)}
-                  />
-                ) : (
-                  <>
-                    {/* Show typing indicator only if it's a bot message that just started streaming */}
-                    {msg.sender === 'Bot' && msg.isStreaming && !msg.text && (
-                      <TypingIndicator />
-                    )}
+                      {/* Message Text */}
+                      {msg.text && (
+                        <div className="mb-3 last:mb-0">
+                          {msg.sender === 'User' ? (
+                            <div className="whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px]">{msg.text}</div>
+                          ) : msg.isStreaming ? (
+                            <StreamingText text={msg.text} isComplete={false} />
+                          ) : (
+                            <div>
+                              <Streamdown
+                                  parseIncompleteMarkdown={true}
+                                  remarkPlugins={[remarkGfm, remarkMath]}
+                                  rehypePlugins={[rehypeKatex]}
+                                  shikiTheme={["github-dark", "github-dark"]}     
+                                   components={{ code: LLMCodeBlock as any }}
 
-                    {/* Message Text Content */}
-                    {msg.text && (
-                      <div className="mb-3 last:mb-0">
-                        {msg.sender === 'User' ? (
-                          <div className="whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px]">{msg.text}</div>
-                        ) : msg.isStreaming ? (
-                          <StreamingText text={msg.text} isComplete={false} />
-                        ) : (
-                          <div className="text-gray-800">
-                            <MarkdownRenderer 
-                              codeBlockComponent={(props: any) => (
-                                <CodeBlock 
-                                  onToggleCodeBlock={onToggleCodeBlock}
-                                  onCopyCode={onCopyCode}
-                                  collapsedBlocks={collapsedBlocks}
-                                  copiedCode={copiedCode}
-                                  {...props}
-                                />
-                              )}
-                            >
-                              {msg.text}
-                            </MarkdownRenderer>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                              >{normalizeFences(msg.text)}</Streamdown>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                    {msg.files && msg.files.length > 0 && (
-                      <div className="mt-4">
-                        {msg.files.map((file, fileIndex) => (
-                          <MessageFilePreview key={fileIndex} file={file} index={fileIndex} />
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
+                      {/* Files */}
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="mt-4">
+                          {msg.files.map((file, fileIndex) => (
+                            <MessageFilePreview key={fileIndex} file={file} index={fileIndex} />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-            
+
             {/* User Message Actions Bar */}
             {msg.sender === 'User' && !msg.isEditing && (
               <div className="flex justify-end mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                <div className="flex items-center gap-0.5 bg-white/95 backdrop-blur-sm rounded-md px-1.5 py-0.5 shadow-sm border border-gray-200/50">
+                <div className="flex items-center gap-0.5 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-md px-1.5 py-0.5 shadow-sm border border-gray-200/50 dark:border-gray-700/50">
                   {/* Copy Message Button */}
                   <button
                     onClick={() => navigator.clipboard.writeText(msg.text)}
-                    className="p-1 hover:bg-gray-100 rounded transition-colors group" 
+                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group"
                     title="Copy message"
                   >
-                    <svg className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    <svg
+                      className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      />
                     </svg>
                   </button>
-                  
+
                   {/* Edit Message Button */}
                   {!isLoading && (
                     <button
                       onClick={() => onToggleEdit(msg.id)}
-                      className="p-1 hover:bg-gray-100 rounded transition-colors group"
+                      className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group"
                       title="Edit message"
                     >
-                      <Edit3 className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700" />
+                      <Edit3 className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
                     </button>
                   )}
-                  
+
                   {/* Navigation for multiple versions */}
                   {((msg.edits && msg.edits.length > 1) || (msg.branches && msg.branches.length > 1)) && !isLoading && (
                     <>
-                      <div className="w-px h-3 bg-gray-300 mx-0.5"></div>
+                      <div className="w-px h-3 bg-gray-300 dark:bg-gray-600 mx-0.5"></div>
                       <button
                         onClick={() => onNavigateUserEdit(msg.id, 'prev')}
                         disabled={
@@ -460,19 +794,18 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                             ? (msg.currentEditIndex ?? msg.edits.length - 1) === 0
                             : (msg.currentBranchIndex ?? 0) === 0
                         }
-                        className="p-1 hover:bg-gray-100 rounded transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
+                        className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
                         title="Previous version"
                       >
-                        <ChevronLeft className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700" />
+                        <ChevronLeft className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
                       </button>
-                      
-                      <span className="px-1.5 py-0.5 text-xs font-medium text-gray-600">
+
+                      <span className="px-1.5 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-400">
                         {msg.edits && msg.edits.length > 1
                           ? `${(msg.currentEditIndex ?? msg.edits.length - 1) + 1}/${msg.edits.length}`
-                          : `${(msg.currentBranchIndex ?? 0) + 1}/${msg.branches?.length || 1}`
-                        }
+                          : `${(msg.currentBranchIndex ?? 0) + 1}/${msg.branches?.length || 1}`}
                       </span>
-                      
+
                       <button
                         onClick={() => onNavigateUserEdit(msg.id, 'next')}
                         disabled={
@@ -480,10 +813,10 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                             ? (msg.currentEditIndex ?? msg.edits.length - 1) === msg.edits.length - 1
                             : (msg.currentBranchIndex ?? 0) === (msg.branches?.length || 1) - 1
                         }
-                        className="p-1 hover:bg-gray-100 rounded transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
+                        className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
                         title="Next version"
                       >
-                        <ChevronRight className="w-3.5 h-3.5 text-gray-500 group-hover:text-gray-700" />
+                        <ChevronRight className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
                       </button>
                     </>
                   )}
@@ -498,3 +831,5 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
     </div>
   );
 };
+
+

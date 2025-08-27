@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* globals.css */
+/* @import 'highlight.js/styles/github.css'; */
+@source "../node_modules/streamdown/dist/index.js";
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -12,17 +16,79 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* Light theme */
+.light {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+/* Dark theme */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+/* Ensure proper theme application */
+html[data-theme="dark"] {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+html[data-theme="light"] {
+  --background: #ffffff;
+  --foreground: #171717;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Compact mode styles */
+.compact-mode .message-container {
+  padding: 0.5rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.compact-mode .chat-message {
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.compact-mode .sidebar-item {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.compact-mode .input-container {
+  padding: 0.75rem 1rem;
+}
+
+.compact-mode .settings-content {
+  padding: 1rem;
+}
+
+.compact-mode .code-block {
+  margin: 0.5rem 0;
+}
+
+/* Font size adjustments */
+.compact-mode {
+  font-size: 0.875rem;
+}
+
+.compact-mode .text-sm {
+  font-size: 0.75rem;
+}
+
+.compact-mode .text-base {
+  font-size: 0.875rem;
+}
+
+.compact-mode .text-lg {
+  font-size: 1rem;
 }
 
 /* Enhanced Custom Scrollbar Styles */
@@ -142,8 +208,7 @@ body {
   }
 }
 
-/* globals.css */
-@import 'highlight.js/styles/github.css';
+
 
 @keyframes blink {
   0%, 50% { opacity: 1; }
@@ -201,8 +266,8 @@ body {
 }
 
 .markdown-content pre {
-  background-color: #f6f8fa !important;
-  border: 1px solid #e1e4e8;
+  /* background-color: #f6f8fa !important; */
+  /* border: 1px solid #e1e4e8; */
   border-radius: 6px;
   font-size: 85%;
   line-height: 1.45;
@@ -211,7 +276,7 @@ body {
 }
 
 .markdown-content code {
-  background-color: rgba(175, 184, 193, 0.2);
+  /* background-color: rgba(175, 184, 193, 0.2); */
   border-radius: 3px;
   font-size: 85%;
   margin: 0;
@@ -353,13 +418,6 @@ body {
 
 .sidebar-collapse {
   animation: slideOutToLeft 0.3s ease-in;
-}
-
-/* Smooth transitions for all elements */
-* {
-  transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
 }
 
 /* Focus styles for accessibility */
@@ -542,4 +600,323 @@ button:focus-visible,
   .tools-dropdown .text-xs {
     font-size: 0.625rem;
   }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Inline code: keep it simple and consistent */
+.sd-inline-code {
+  background: color-mix(in oklab, Canvas, CanvasText 7%);
+  border: 1px solid color-mix(in oklab, CanvasText, transparent 85%);
+  padding: .1rem .35rem;
+  border-radius: .35rem;
+  font: .95em ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Block shell */
+.sd-code-block {
+  margin: 1rem 0 1.25rem;
+  border-radius: .6rem;
+  border: 1px solid color-mix(in oklab, CanvasText, transparent 85%);
+  overflow: hidden;
+  background: transparent;
+}
+
+/* Header */
+.sd-code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .5rem .75rem;
+  background: color-mix(in oklab, Canvas, CanvasText 5%);
+  border-bottom: 1px solid color-mix(in oklab, CanvasText, transparent 85%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.sd-code-title { opacity: .8; font-size: .8rem; text-transform: lowercase; }
+.sd-code-actions { display: inline-flex; gap: .25rem; }
+.sd-btn { border: 0; padding: .25rem .5rem; border-radius: .35rem; cursor: pointer; font-size: .8rem; }
+.sd-btn-ghost { background: transparent; }
+.sd-btn-ghost:hover { background: color-mix(in oklab, CanvasText, transparent 92%); }
+
+/* Scroll container (Shiki emits <pre class="shiki">…) */
+.sd-code-scroll { position: relative; overflow: auto; }
+
+/* Wrapping toggle */
+.sd-code-block.sd-wrap pre.shiki code .line {
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* Line numbers via counters on Shiki's .line spans */
+.sd-code-scroll pre.shiki { counter-reset: line; padding-left: 3.25rem; }
+.sd-code-scroll pre.shiki code .line {
+  counter-increment: line; position: relative; padding-left: .25rem;
+}
+.sd-code-scroll pre.shiki code .line::before {
+  content: counter(line);
+  position: absolute; left: -2.75rem; width: 2.25rem; text-align: right;
+  opacity: .45; user-select: none;
+}
+
+/* Diff & highlight & focus (from transformers) */
+pre.shiki.has-diff code .line.diff.add    { background: color-mix(in oklab, #10b981, Canvas 80%); }
+pre.shiki.has-diff code .line.diff.remove { background: color-mix(in oklab, #ef4444, Canvas 82%); }
+pre.shiki code .line.highlighted          { background: color-mix(in oklab, #f59e0b, Canvas 85%); }
+pre.shiki code .line.focus                { outline: 1px dashed color-mix(in oklab, CanvasText, transparent 65%); }
+
+/* Error/Warning tiers (notation highlight variants) */
+pre.shiki code .line.highlighted.error   { background: color-mix(in oklab, #ef4444, Canvas 85%); }
+pre.shiki code .line.highlighted.warning { background: color-mix(in oklab, #f59e0b, Canvas 88%); }
+
+/* Rendered whitespace (transformerRenderWhitespace emits spans) */
+pre.shiki .ws-space::before { content: "·"; opacity: .35; }
+pre.shiki .ws-tab::before   { content: "⇥"; opacity: .35; }
+
+/* Color chips (transformerColorHighlight adds inline color swatches) */
+pre.shiki .shiki-color-swatch {
+  display: inline-block; vertical-align: middle; width: .85em; height: .85em;
+  border-radius: .15em; border: 1px solid color-mix(in oklab, CanvasText, transparent 85%);
+  margin-right: .25em;
+}
+
+/* Respect dual theme tokens emitted by Shiki */
+@media (prefers-color-scheme: dark) {
+  .shiki, .shiki span {
+    color: var(--shiki-dark) !important;
+    background-color: var(--shiki-dark-bg) !important;
+    font-style: var(--shiki-dark-font-style) !important;
+    font-weight: var(--shiki-dark-font-weight) !important;
+    text-decoration: var(--shiki-dark-text-decoration) !important;
+  }
+}
+
+
+
+
+/* Line Numbers for Code Blocks */
+.line-numbers {
+  counter-reset: line;
+}
+
+.line-numbers pre.shiki {
+  padding-left: 3rem !important;
+}
+
+.line-numbers pre.shiki code .line {
+  counter-increment: line;
+  position: relative;
+  padding-left: 0.5rem;
+}
+
+.line-numbers pre.shiki code .line::before {
+  content: counter(line);
+  position: absolute;
+  left: -2.5rem;
+  width: 2rem;
+  text-align: right;
+  color: #6b7280;
+  opacity: 0.6;
+  user-select: none;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.dark .line-numbers pre.shiki code .line::before {
+  color: #9ca3af;
+}
+
+/* Ensure proper syntax highlighting for both themes */
+pre.shiki {
+  background: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+pre.shiki code {
+  background: transparent !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Light theme syntax highlighting */
+pre.shiki[style*="github-light"] {
+  color: #24292f !important;
+}
+
+/* Dark theme syntax highlighting */
+pre.shiki[style*="github-dark"] {
+  color: #e6edf3 !important;
+}
+
+/* Ensure proper contrast for syntax highlighting tokens */
+pre.shiki .token.keyword {
+  color: #d73a49 !important;
+}
+
+pre.shiki .token.string {
+  color: #032f62 !important;
+}
+
+pre.shiki .token.comment {
+  color: #6a737d !important;
+}
+
+pre.shiki .token.function {
+  color: #6f42c1 !important;
+}
+
+pre.shiki .token.number {
+  color: #005cc5 !important;
+}
+
+/* Dark theme specific token colors */
+.dark pre.shiki .token.keyword {
+  color: #ff7b72 !important;
+}
+
+.dark pre.shiki .token.string {
+  color: #a5d6ff !important;
+}
+
+.dark pre.shiki .token.comment {
+  color: #8b949e !important;
+}
+
+.dark pre.shiki .token.function {
+  color: #d2a8ff !important;
+}
+
+.dark pre.shiki .token.number {
+  color: #79c0ff !important;
+}
+
+/* Enhanced Syntax Highlighting Colors */
+.enhanced-syntax-highlighting {
+  /* Base text color */
+  color: #e4e4e7 !important;
+}
+
+.enhanced-syntax-highlighting .token.comment,
+.enhanced-syntax-highlighting .token.prolog,
+.enhanced-syntax-highlighting .token.doctype,
+.enhanced-syntax-highlighting .token.cdata {
+  color: #6b7280 !important;
+  font-style: italic;
+}
+
+.enhanced-syntax-highlighting .token.punctuation {
+  color: #d1d5db !important;
+}
+
+.enhanced-syntax-highlighting .token.property,
+.enhanced-syntax-highlighting .token.tag,
+.enhanced-syntax-highlighting .token.boolean,
+.enhanced-syntax-highlighting .token.number,
+.enhanced-syntax-highlighting .token.constant,
+.enhanced-syntax-highlighting .token.symbol {
+  color: #60a5fa !important;
+}
+
+.enhanced-syntax-highlighting .token.selector,
+.enhanced-syntax-highlighting .token.attr-name,
+.enhanced-syntax-highlighting .token.string,
+.enhanced-syntax-highlighting .token.char,
+.enhanced-syntax-highlighting .token.builtin {
+  color: #34d399 !important;
+}
+
+.enhanced-syntax-highlighting .token.operator,
+.enhanced-syntax-highlighting .token.entity,
+.enhanced-syntax-highlighting .token.url,
+.enhanced-syntax-highlighting .language-css .token.string,
+.enhanced-syntax-highlighting .style .token.string {
+  color: #f87171 !important;
+}
+
+.enhanced-syntax-highlighting .token.atrule,
+.enhanced-syntax-highlighting .token.attr-value,
+.enhanced-syntax-highlighting .token.keyword {
+  color: #fbbf24 !important;
+}
+
+.enhanced-syntax-highlighting .token.function {
+  color: #a78bfa !important;
+}
+
+.enhanced-syntax-highlighting .token.regex,
+.enhanced-syntax-highlighting .token.important,
+.enhanced-syntax-highlighting .token.variable {
+  color: #fb7185 !important;
+}
+
+.enhanced-syntax-highlighting .token.important,
+.enhanced-syntax-highlighting .token.bold {
+  font-weight: bold;
+}
+
+.enhanced-syntax-highlighting .token.italic {
+  font-style: italic;
+}
+
+.enhanced-syntax-highlighting .token.entity {
+  cursor: help;
+}
+
+/* Python-specific enhancements */
+.enhanced-syntax-highlighting .token.keyword.def,
+.enhanced-syntax-highlighting .token.keyword.class,
+.enhanced-syntax-highlighting .token.keyword.return {
+  color: #fbbf24 !important;
+  font-weight: 600;
+}
+
+.enhanced-syntax-highlighting .token.string.docstring {
+  color: #34d399 !important;
+  font-style: italic;
+}
+
+.enhanced-syntax-highlighting .token.comment.hashbang {
+  color: #6b7280 !important;
+}
+
+/* JavaScript/TypeScript specific */
+.enhanced-syntax-highlighting .token.keyword.function,
+.enhanced-syntax-highlighting .token.keyword.const,
+.enhanced-syntax-highlighting .token.keyword.let,
+.enhanced-syntax-highlighting .token.keyword.var {
+  color: #fbbf24 !important;
+  font-weight: 600;
+}
+
+.enhanced-syntax-highlighting .token.keyword.import,
+.enhanced-syntax-highlighting .token.keyword.export {
+  color: #a78bfa !important;
+}
+
+/* Override any Shiki theme colors that might be too subtle */
+.enhanced-syntax-highlighting [class*="shiki"] {
+  background: transparent !important;
+}
+
+.enhanced-syntax-highlighting [class*="shiki"] * {
+  color: inherit !important;
 }
