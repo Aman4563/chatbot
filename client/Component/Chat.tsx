@@ -144,8 +144,8 @@ const Chat: React.FC = () => {
 
   return (
     <div
-      className={`flex-1 flex flex-col h-full w-full bg-gradient-to-br from-gray-50 via-white to-blue-50/30 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 relative transition-all duration-300 ${
-        dragOver ? 'bg-gradient-to-br from-blue-100 via-blue-50 to-indigo-100 dark:from-blue-900 dark:via-blue-800 dark:to-indigo-900' : ''
+      className={`flex-1 flex flex-col h-full w-full chat-bg-gradient relative transition-all duration-300 overflow-hidden ${
+        dragOver ? 'chat-bg-drag' : ''
         }`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
@@ -158,13 +158,11 @@ const Chat: React.FC = () => {
       <ChatHeader
         selectedModel={selectedModel}
         activeConversation={activeConversation}
-        copiedChat={copiedChat}
-        onCopyChat={copyChatAsMarkdown}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* Messages Area */}
-      <div className="flex-1 min-h-0 w-full h-full">
+      <div className="flex-1 w-full overflow-hidden min-h-0">
         <ChatMessages
           activeConversation={activeConversation}
           isLoading={isLoading}
@@ -211,7 +209,12 @@ const Chat: React.FC = () => {
       />
 
       {/* Settings Modal */}
-      <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <Settings 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)}
+        onCopyChat={copyChatAsMarkdown}
+        copiedChat={copiedChat}
+      />
     </div>
   );
 };

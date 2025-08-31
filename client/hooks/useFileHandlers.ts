@@ -19,7 +19,7 @@ export const useFileHandlers = ({
     }
 
     // Validate file type
-    if (!CHAT_CONSTANTS.ALLOWED_FILE_TYPES.includes(file.type)) {
+    if (!CHAT_CONSTANTS.ALLOWED_FILE_TYPES.includes(file.type as any)) {
       alert(`File type ${file.type} is not supported.`);
       return null;
     }

@@ -9,12 +9,12 @@ export const getThemeClasses = (baseClasses: string, darkClasses: string = '') =
 export const themeClasses = {
   // Backgrounds
   bg: {
-    primary: 'bg-white dark:bg-gray-900',
-    secondary: 'bg-gray-50 dark:bg-gray-800',
-    tertiary: 'bg-gray-100 dark:bg-gray-700',
-    sidebar: 'bg-slate-100 dark:bg-slate-900',
-    modal: 'bg-white dark:bg-gray-800',
-    card: 'bg-white dark:bg-gray-800',
+    primary: 'bg-white dark:bg-night',
+    secondary: 'bg-gray-50 dark:bg-eerie-black',
+    tertiary: 'bg-gray-100 dark:bg-gunmetal-3',
+    sidebar: 'bg-slate-100 dark:bg-eerie-black',
+    modal: 'bg-white dark:bg-eerie-black',
+    card: 'bg-white dark:bg-eerie-black',
   },
   
   // Text colors
@@ -48,6 +48,11 @@ export const themeClasses = {
 
 // Apply theme to HTML element
 export const applyThemeToDOM = (theme: Theme) => {
+  // Only run on client side
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return;
+  }
+
   const root = document.documentElement;
   
   // Remove any existing theme classes
@@ -60,7 +65,7 @@ export const applyThemeToDOM = (theme: Theme) => {
     root.classList.add('light');
   } else if (theme === 'auto') {
     // Auto mode - use system preference
-    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
       root.classList.add('dark');
     } else {
       root.classList.add('light');
@@ -69,14 +74,16 @@ export const applyThemeToDOM = (theme: Theme) => {
   
   // Set data attribute for CSS targeting
   const appliedTheme = theme === 'auto' 
-    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : theme;
   root.setAttribute('data-theme', appliedTheme);
 };
 
 // Check if dark mode is active
 export const isDarkMode = (): boolean => {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return false; // Default to light mode during SSR
+  }
   
   // Check for dark class
   if (document.documentElement.classList.contains('dark')) {
@@ -89,12 +96,14 @@ export const isDarkMode = (): boolean => {
   }
   
   // Fallback to system preference
-  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
 };
 
 // Get current theme from DOM
 export const getCurrentTheme = (): 'light' | 'dark' => {
-  if (typeof window === 'undefined') return 'light';
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return 'light'; // Default to light mode during SSR
+  }
   
   const root = document.documentElement;
   
@@ -107,5 +116,5 @@ export const getCurrentTheme = (): 'light' | 'dark' => {
   }
   
   // Fallback to system preference
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };

@@ -115,7 +115,6 @@ export const useChatHandlers = ({
 
     try {
       const url: string = await dispatch(generateImage({ prompt: input })).unwrap();
-      console.log('🖼️ generateImage payload →', url);
 
       dispatch(addImageToHistory({ prompt: input, url }));
       const markdown = `![Generated Image](${url})\n\n*Prompt: "${input}"*`;

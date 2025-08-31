@@ -22,10 +22,11 @@ export const metadata: Metadata = {
   viewport: {
     width: "device-width",
     initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
+    maximumScale: 5,
+    userScalable: true,
+    viewportFit: "cover",
   },
-  themeColor: "#1e293b",
+  themeColor: "#2e3943ff",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

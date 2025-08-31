@@ -34,16 +34,30 @@ export function ImageWithHistory({ src, alt, maxHeight }: ImageWithHistoryProps)
     <div className="my-4 text-center">
       {history.length > 1 && (
         <div className="flex items-center justify-center gap-4 mb-2">
-          <button onClick={() => setCurrentIndex(i => Math.max(i - 1, 0))} disabled={atStart} aria-label="Previous">‹</button>
-          <span className="text-sm text-gray-600">{currentIndex + 1} / {history.length}</span>
-          <button onClick={() => setCurrentIndex(i => Math.min(i + 1, history.length - 1))} disabled={atEnd} aria-label="Next">›</button>
+          <button 
+            onClick={() => setCurrentIndex(i => Math.max(i - 1, 0))} 
+            disabled={atStart} 
+            aria-label="Previous"
+            className="image-history-nav-bg image-history-nav-text disabled:image-history-nav-disabled"
+          >
+            ‹
+          </button>
+          <span className="text-sm image-history-counter-text">{currentIndex + 1} / {history.length}</span>
+          <button 
+            onClick={() => setCurrentIndex(i => Math.min(i + 1, history.length - 1))} 
+            disabled={atEnd} 
+            aria-label="Next"
+            className="image-history-nav-bg image-history-nav-text disabled:image-history-nav-disabled"
+          >
+            ›
+          </button>
         </div>
       )}
 
       <img
         src={history[currentIndex]}
         alt={alt || 'Generated image'}
-        className="max-w-full transition-transform hover:scale-[1.02]"
+        className="max-w-full transition-transform image-history-image-hover-scale"
         style={{ maxHeight: maxHeight || '500px', objectFit: 'contain' }}
         loading="lazy"
       />

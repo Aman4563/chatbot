@@ -25,20 +25,17 @@ type CodeProps = {
   inline?: boolean;
   className?: string;
   children?: React.ReactNode;
-  // react-markdown/Streamdown often pass meta via node or data-*; adapt as needed:
-  // @ts-ignore
-  node?: { meta?: string };
-  // @ts-ignore
-  "data-meta"?: string;
+  node?: any;
+  [key: string]: any;
 };
 
 function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (m) =>
-    m === "&" ? "&amp;" :
-    m === "<" ? "&lt;" :
-    m === ">" ? "&gt;" :
-    m === '"' ? "&quot;" : "&#39;"
-  );
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /** Lightweight Mermaid renderer for ```mermaid``` fences */
@@ -52,15 +49,16 @@ function MermaidBlock({
   const id = useId();
   const [svg, setSvg] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
+    setIsLoading(true);
 
     // Initialize Mermaid for this render pass
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "strict",
-      // You can tune other options if needed (fontFamily, logLevel, etc.)
       theme,
     });
 
@@ -70,37 +68,53 @@ function MermaidBlock({
         if (!cancelled) {
           setSvg(svg);
           setErr(null);
+          setIsLoading(false);
         }
       } catch (e: any) {
         if (!cancelled) {
           setErr(e?.message || "Failed to render diagram");
           setSvg("");
+          setIsLoading(false);
         }
       }
     })();
 
     return () => {
       cancelled = true;
-      // Optional: reset internal cache between renders
-      // mermaid.reset(); // uncomment if you hit stale state issues
     };
   }, [code, id, theme]);
 
-  if (err) {
+  if (isLoading) {
     return (
-      <div className="p-4 text-sm text-red-600 dark:text-red-400">
-        Mermaid error: {err}
-        <pre className="mt-2 overflow-auto rounded bg-slate-100 dark:bg-slate-800 p-3 text-xs">
-          {code}
-        </pre>
+      <div className="p-4 text-xs text-slate-500 dark:text-slate-400">
+        Rendering diagram…
       </div>
     );
   }
 
-  if (!svg) {
+  if (err) {
     return (
-      <div className="p-4 text-xs text-slate-500 dark:text-slate-400">
-        Rendering diagram…
+      <div className="p-4">
+        <div className="flex items-start gap-3 p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg">
+          <div className="flex-shrink-0 mt-0.5">
+            <svg className="w-4 h-4 text-orange-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-orange-700 dark:text-orange-300 mb-2">
+              Unable to render diagram due to syntax error.
+            </p>
+            <details className="group">
+              <summary className="cursor-pointer text-xs text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 font-medium">
+                View diagram code
+              </summary>
+              <pre className="mt-2 overflow-auto rounded bg-orange-100 dark:bg-orange-900/30 p-3 text-xs text-orange-800 dark:text-orange-200 border border-orange-200 dark:border-orange-800">
+                {code}
+              </pre>
+            </details>
+          </div>
+        </div>
       </div>
     );
   }
@@ -117,7 +131,7 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
   // Inline: never run Shiki to avoid conflicts with single backticks
   if (inline || !/language-/.test(className || "")) {
     return (
-      <code className="rounded px-1.5 py-0.5 font-mono text-[0.9em] bg-slate-200/70 dark:bg-slate-700/70 text-slate-800 dark:text-slate-200">
+      <code className="rounded px-1.5 py-0.5 font-mono text-[0.9em] code-inline">
         {children}
       </code>
     );
@@ -176,8 +190,6 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
 
   // Determine the actual theme to use for code highlighting
   const getEffectiveTheme = () => {
-    // If you also support a manual "codeBlockTheme" override, prefer it here:
-    // const preferred = codeBlockTheme || 'auto'
     let theme = "github-light"; // default
 
     if (websiteTheme === "dark") {
@@ -198,7 +210,6 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
   // Mermaid theme from site theme
   const getMermaidTheme = (): "default" | "dark" | "forest" | "neutral" => {
     const eff = getEffectiveTheme();
-    // crude map: any "dark" -> mermaid dark, else default
     return /dark/i.test(eff) ? "dark" : "default";
   };
 
@@ -225,10 +236,9 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
         transformerNotationDiff(),
         transformerNotationHighlight(),
         transformerNotationFocus(),
-        transformerMetaHighlight(),        // ```js {1,3-4}
-        transformerMetaWordHighlight(),    // ```
+        transformerMetaHighlight(),
+        transformerMetaWordHighlight(),
       ],
-      // Optional: define meta directly (if your parser doesn't pass it)
       meta,
     })
       .then((out) => {
@@ -242,27 +252,28 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw, mappedLang, meta, themeKey]);
 
   // UX: line count for the header badge
   const lineCount = useMemo(() => raw.split("\n").length, [raw]);
 
+  // Mermaid-specific memoized values (always computed, but only used for mermaid)
+  const mermaidTheme = useMemo(() => getMermaidTheme(), [websiteTheme]);
+  const cleanedMermaid = useMemo(() => raw, [raw]);
+
   // --- MERMAID RENDER PATH ---------------------------------------------------
   if (mappedLang === "mermaid") {
-    const mermaidTheme = getMermaidTheme();
-
     return (
-      <div className="my-4 overflow-hidden rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg dark:shadow-slate-900/50">
+      <div className="my-4 overflow-hidden rounded-xl border code-block-border code-block-bg shadow-lg">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2.5">
+        <div className="flex items-center justify-between border-b code-header-border code-header-bg px-3 py-2.5">
           <div className="flex items-center gap-3">
             {showLanguageBadge && (
-              <span className="rounded-md bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-semibold capitalize text-slate-700 dark:text-slate-300">
+              <span className="rounded-md code-lang-bg px-2 py-0.5 text-xs font-semibold capitalize code-lang-text">
                 {title || "mermaid"}
               </span>
             )}
-            <span className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="text-xs code-header-text">
               {lineCount} line{lineCount !== 1 ? "s" : ""}
             </span>
           </div>
@@ -271,8 +282,8 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
             <button
               type="button"
               aria-label="Copy diagram source"
-              className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-[0.99] transition"
-              onClick={() => navigator.clipboard.writeText(raw)}
+              className="rounded-md border code-button-border code-button-bg px-2 py-1 text-xs font-medium code-button-text hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-[0.99] transition"
+              onClick={() => navigator.clipboard.writeText(cleanedMermaid)}
             >
               Copy source
             </button>
@@ -281,25 +292,26 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
 
         {/* Body (Mermaid SVG) */}
         <div className="relative">
-          <MermaidBlock code={raw} theme={mermaidTheme} />
+          <MermaidBlock code={cleanedMermaid} theme={mermaidTheme} />
         </div>
       </div>
     );
   }
+
   // ---------------------------------------------------------------------------
 
   // DEFAULT (non-Mermaid) RENDER PATH WITH SHIKI
   return (
-    <div className="my-4 overflow-hidden rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg dark:shadow-slate-900/50">
+    <div className="my-4 overflow-hidden rounded-xl border code-block-border code-block-bg shadow-lg">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2.5">
+      <div className="flex items-center justify-between border-b code-header-border code-header-bg px-3 py-2.5">
         <div className="flex items-center gap-3">
           {showLanguageBadge && (
-            <span className="rounded-md bg-slate-200 dark:bg-slate-700 px-2 py-0.5 text-xs font-semibold capitalize text-slate-700 dark:text-slate-300">
+            <span className="rounded-md code-lang-bg px-2 py-0.5 text-xs font-semibold capitalize code-lang-text">
               {title}
             </span>
           )}
-          <span className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="text-xs code-header-text">
             {lineCount} line{lineCount !== 1 ? "s" : ""}
           </span>
         </div>
@@ -308,28 +320,18 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
           <button
             type="button"
             aria-label="Copy code"
-            className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-[0.99] transition"
+            className="rounded-md border code-button-border code-button-bg px-2 py-1 text-xs font-medium code-button-text hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-[0.99] transition"
             onClick={() => navigator.clipboard.writeText(raw)}
           >
             Copy
           </button>
-          <button
-            type="button"
-            aria-label="Toggle wrap"
-            className="rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-[0.99] transition"
-            onClick={() => setWrap((v) => !v)}
-          >
-            {wrap ? "No-wrap" : "Wrap"}
-          </button>
         </div>
       </div>
 
-      {/* Body */}
-      <div className={`relative ${wrap ? "" : "overflow-x-auto"}`}>
+      {/* Body (Code) */}
+      <div className="relative">
         <div
-          className={`p-4 text-[13px] leading-relaxed font-mono bg-transparent ${
-            wrap ? "whitespace-pre-wrap break-words" : ""
-          } ${showLineNumbers ? "line-numbers" : ""}`}
+          className={`overflow-auto ${wrap ? "whitespace-pre-wrap" : ""}`}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       </div>

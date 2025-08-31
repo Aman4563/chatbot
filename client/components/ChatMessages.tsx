@@ -457,12 +457,12 @@ const EditableMessage = ({
   return (
     <div className="space-y-3">
       {/* Edit Form */}
-      <div className="bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg p-4 border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div className="card-bg backdrop-blur-sm rounded-lg p-4 border card-border shadow-sm">
         <textarea
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-800 dark:text-gray-200 bg-white dark:bg-gray-700 shadow-sm transition-all duration-200"
+          className="w-full p-3 border input-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 input-text input-bg shadow-sm transition-all duration-200"
           rows={Math.max(2, editText.split('\n').length)}
           autoFocus
           placeholder="Type your message..."
@@ -471,24 +471,24 @@ const EditableMessage = ({
 
       {/* Action Bar */}
       <div className="flex justify-center">
-        <div className="flex items-center gap-1 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-lg px-2 py-1 shadow-sm border border-gray-200/50 dark:border-gray-700/50">
+        <div className="flex items-center gap-1 action-button-group">
           <button
             onClick={onCancel}
-            className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors group"
+            className="p-1.5 nav-button rounded-md group"
             title="Cancel editing"
           >
-            <X className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+            <X className="w-4 h-4" />
           </button>
 
-          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+          <div className="w-px h-4 nav-border mx-1"></div>
 
           <button
             onClick={handleSave}
-            className="p-1.5 hover:bg-green-100 dark:hover:bg-green-900/30 rounded-md transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
+            className="p-1.5 nav-button rounded-md group disabled:opacity-40 disabled:hover:bg-transparent"
             disabled={!editText.trim()}
             title="Save & regenerate"
           >
-            <Check className="w-4 h-4 text-gray-500 dark:text-gray-400 group-hover:text-green-600 dark:group-hover:text-green-400" />
+            <Check className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -515,10 +515,10 @@ const MessageFilePreview = ({ file, index }: { file: FileData; index: number }) 
     return (
       <div
         key={index}
-        className="inline-flex items-center gap-1 sm:gap-2 m-1 px-2 sm:px-3 py-1.5 sm:py-2 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl text-xs sm:text-sm transition-all duration-200"
+        className="inline-flex items-center gap-1 sm:gap-2 m-1 px-2 sm:px-3 py-1.5 sm:py-2 file-preview-item rounded-xl text-xs sm:text-sm"
       >
-        <div className="flex items-center gap-1 sm:gap-2 text-gray-700">
-          <FileIcon mimeType={file.mime_type} className="w-3 h-3 sm:w-4 sm:h-4" />
+        <div className="flex items-center gap-1 sm:gap-2 file-preview-text">
+          <FileIcon mimeType={file.mime_type} className="w-3 h-3 sm:w-4 sm:h-4 file-preview-icon" />
           <span className="truncate max-w-20 sm:max-w-32 font-medium">{file.filename}</span>
         </div>
       </div>
@@ -529,13 +529,13 @@ const MessageFilePreview = ({ file, index }: { file: FileData; index: number }) 
 // Typing indicator
 const TypingIndicator = () => {
   return (
-    <div className="flex items-center space-x-2 py-3">
+            <div className="flex items-center space-x-2 py-3">
       <div className="flex space-x-1">
-        <div className="w-2 h-2 bg-blue-500 rounded-full typing-dot"></div>
-        <div className="w-2 h-2 bg-blue-500 rounded-full typing-dot"></div>
-        <div className="w-2 h-2 bg-blue-500 rounded-full typing-dot"></div>
+        <div className="w-2 h-2 typing-dot-bg rounded-full typing-dot"></div>
+        <div className="w-2 h-2 typing-dot-bg rounded-full typing-dot"></div>
+        <div className="w-2 h-2 typing-dot-bg rounded-full typing-dot"></div>
       </div>
-      <span className="text-gray-500 text-sm">AI is thinking...</span>
+      <span className="typing-text text-sm">AI is thinking...</span>
     </div>
   );
 };
@@ -543,15 +543,20 @@ const TypingIndicator = () => {
 // Streaming text wrapper
 const StreamingText = ({ text, isComplete }: { text: string; isComplete: boolean }) => {
   const content = useMemo(() => autoMathify(text), [text]);
-  return <Streamdown
-  parseIncompleteMarkdown={true}
+  return (
+    <div className="min-w-0 overflow-hidden">
+      <Streamdown
+        parseIncompleteMarkdown={true}
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         // Ensure Shiki uses a dark theme so tokens pop on our dark pre background
         shikiTheme={["github-dark", "github-dark"]}
-        components={{ code: LLMCodeBlock as any  }}
-
-  >{normalizeFences(content)}</Streamdown>;
+        components={{ code: LLMCodeBlock as any }}
+      >
+        {normalizeFences(content)}
+      </Streamdown>
+    </div>
+  );
 };
 
 export const ChatMessages: React.FC<ChatMessagesProps> = ({
@@ -569,69 +574,69 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
   messagesEndRef
 }) => {
   return (
-    <div className="flex-1 overflow-y-auto bg-transparent custom-scrollbar h-full">
-      <div className="w-full max-w-4xl mx-auto px-3 sm:px-4 md:px-6 py-4 sm:py-6 min-h-full">
+    <div className="flex-1 overflow-y-auto bg-transparent custom-scrollbar h-full mobile-scroll">
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 min-h-full">
         {activeConversation.messages.length === 0 && !isLoading && (
           <div className="text-center py-12 sm:py-16 md:py-20">
             <div className="relative mb-6 sm:mb-8 mx-auto w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32">
               <div className="absolute inset-0 bg-gradient-to-br from-blue-400 via-purple-500 to-indigo-600 rounded-3xl shadow-2xl transform rotate-3 animate-pulse"></div>
-              <div className="relative w-full h-full bg-white rounded-3xl shadow-xl flex items-center justify-center transform -rotate-3 hover:rotate-0 transition-transform duration-500">
-                <MessageCircle className="w-10 h-10 sm:w-12 sm:h-12 md:w-16 md:h-16 text-blue-600" />
+              <div className="relative w-full h-full bg-white dark:bg-gunmetal-2 rounded-3xl shadow-xl flex items-center justify-center transform -rotate-3 hover:rotate-0 transition-transform duration-500">
+                <MessageCircle className="w-10 h-10 sm:w-12 sm:h-12 md:w-16 md:h-16 text-blue-600 dark:text-blue-400" />
               </div>
             </div>
-            <h4 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-gray-800 via-blue-800 to-purple-800 bg-clip-text text-transparent mb-4">
+            <h4 className="text-2xl sm:text-3xl font-bold bg-gradient-to-r from-gray-800 via-blue-800 to-purple-800 dark:from-blue-200 dark:via-purple-200 dark:to-indigo-200 bg-clip-text text-transparent mb-4">
               Welcome to Xbot!
             </h4>
-            <p className="text-gray-600 mb-6 sm:mb-8 text-base sm:text-lg leading-relaxed max-w-xl mx-auto px-4">
+            <p className="text-gray-600 dark:text-gray-300 mb-6 sm:mb-8 text-base sm:text-lg leading-relaxed max-w-2xl mx-auto px-4">
               Your intelligent AI assistant powered by multiple advanced language models.
               <br />
               Ready to help with questions, analysis, creativity, and more.
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 max-w-2xl mx-auto mb-6 sm:mb-8 px-4">
-              <div className="group p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl border border-blue-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-                <div className="w-6 h-6 sm:w-8 sm:h-8 bg-blue-500 rounded-xl flex items-center justify-center mb-1 sm:mb-2 mx-auto group-hover:scale-110 transition-transform">
-                  <MessageCircle className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 max-w-4xl mx-auto mb-6 sm:mb-8 px-4 welcome-cards-container">
+              <div className="group p-4 sm:p-5 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-gunmetal-2 dark:to-charcoal-2 rounded-2xl border border-blue-200 dark:border-charcoal/30 hover:shadow-lg dark:hover:shadow-blue-500/10 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-blue-500 dark:bg-blue-600 rounded-xl flex items-center justify-center mb-2 sm:mb-3 mx-auto group-hover:scale-110 transition-transform">
+                  <MessageCircle className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
-                <span className="text-blue-800 text-xs sm:text-sm font-semibold">Chat</span>
+                <span className="text-blue-800 dark:text-blue-200 text-sm sm:text-base font-semibold">Chat</span>
               </div>
-              <div className="group p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-2xl border border-green-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-                <div className="w-6 h-6 sm:w-8 sm:h-8 bg-green-500 rounded-xl flex items-center justify-center mb-1 sm:mb-2 mx-auto group-hover:scale-110 transition-transform">
-                  <FileText className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+              <div className="group p-4 sm:p-5 bg-gradient-to-br from-green-50 to-green-100 dark:from-gunmetal-2 dark:to-charcoal-2 rounded-2xl border border-green-200 dark:border-charcoal/30 hover:shadow-lg dark:hover:shadow-green-500/10 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-green-500 dark:bg-green-600 rounded-xl flex items-center justify-center mb-2 sm:mb-3 mx-auto group-hover:scale-110 transition-transform">
+                  <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
-                <span className="text-green-800 text-xs sm:text-sm font-semibold">Documents</span>
+                <span className="text-green-800 dark:text-green-200 text-sm sm:text-base font-semibold">Documents</span>
               </div>
-              <div className="group p-3 sm:p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-2xl border border-purple-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-                <div className="w-6 h-6 sm:w-8 sm:h-8 bg-purple-500 rounded-xl flex items-center justify-center mb-1 sm:mb-2 mx-auto group-hover:scale-110 transition-transform">
-                  <ImageIcon className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+              <div className="group p-4 sm:p-5 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-gunmetal-2 dark:to-charcoal-2 rounded-2xl border border-purple-200 dark:border-charcoal/30 hover:shadow-lg dark:hover:shadow-purple-500/10 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-purple-500 dark:bg-purple-600 rounded-xl flex items-center justify-center mb-2 sm:mb-3 mx-auto group-hover:scale-110 transition-transform">
+                  <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
-                <span className="text-purple-800 text-xs sm:text-sm font-semibold">Images</span>
+                <span className="text-purple-800 dark:text-purple-200 text-sm sm:text-base font-semibold">Images</span>
               </div>
-              <div className="group p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-2xl border border-orange-200 hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-                <div className="w-6 h-6 sm:w-8 sm:h-8 bg-orange-500 rounded-xl flex items-center justify-center mb-1 sm:mb-2 mx-auto group-hover:scale-110 transition-transform">
-                  <Bot className="w-3 h-3 sm:w-4 sm:h-4 text-white" />
+              <div className="group p-4 sm:p-5 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-gunmetal-2 dark:to-charcoal-2 rounded-2xl border border-orange-200 dark:border-charcoal/30 hover:shadow-lg dark:hover:shadow-orange-500/10 transition-all duration-300 hover:-translate-y-1">
+                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-orange-500 dark:bg-orange-600 rounded-xl flex items-center justify-center mb-2 sm:mb-3 mx-auto group-hover:scale-110 transition-transform">
+                  <Bot className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
-                <span className="text-orange-800 text-xs sm:text-sm font-semibold">Analysis</span>
+                <span className="text-orange-800 dark:text-orange-200 text-sm sm:text-base font-semibold">Analysis</span>
               </div>
             </div>
-            <p className="text-sm text-gray-500">💡 Try asking questions, uploading files, or generating images</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">💡 Try asking questions, uploading files, or generating images</p>
           </div>
         )}
 
         {activeConversation.messages.map((msg, idx) => (
-          <div key={msg.id || idx} className={`mb-4 sm:mb-6 ${msg.sender === 'User' ? 'group' : ''}`}>
+          <div key={msg.id || idx} className={`mb-6 sm:mb-8 ${msg.sender === 'User' ? 'group' : ''}`}>
             <div className={`flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={`flex gap-2 sm:gap-3 md:gap-4 ${
-                  msg.sender === 'User' ? 'max-w-sm sm:max-w-md md:max-w-lg' : 'max-w-full sm:max-w-3xl lg:max-w-4xl'
+                              <div
+                                  className={`flex gap-3 sm:gap-4 lg:gap-5 ${
+                  msg.sender === 'User' ? 'max-w-[90%] sm:max-w-[85%] md:max-w-[80%] lg:max-w-[75%] xl:max-w-[70%]' : 'max-w-[95%] sm:max-w-[92%] md:max-w-[90%] lg:max-w-[88%] xl:max-w-[85%]'
                 } ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}
-              >
+                >
                 {/* Avatar */}
                 <div
                   className={`
                 w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-2xl flex items-center justify-center flex-shrink-0 mt-1 shadow-lg ring-2 ring-white
                 ${msg.sender === 'User'
-                    ? 'bg-gradient-to-br from-green-500 to-emerald-600'
-                    : 'bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600'
+                    ? 'avatar-user'
+                    : 'avatar-bot'
                   }
               `}
                 >
@@ -645,10 +650,10 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                 {/* Message Content */}
                 <div
                   className={`
-                px-3 sm:px-4 md:px-5 py-3 sm:py-4 rounded-2xl shadow-lg border backdrop-blur-sm relative group transition-all duration-200 hover:shadow-xl
+                px-4 sm:px-5 md:px-6 py-4 sm:py-5 rounded-2xl shadow-lg border backdrop-blur-sm relative group transition-all duration-200 hover:shadow-xl min-w-0 flex-1
                 ${msg.sender === 'User'
-                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20 flex-shrink'
-                    : 'bg-white/95 dark:bg-gray-800/95 text-gray-800 dark:text-gray-200 border-gray-200/50 dark:border-gray-700/50 hover:bg-white dark:hover:bg-gray-800 flex-1'
+                    ? 'chat-message-user'
+                    : 'chat-message-bot'
                   }
                 ${msg.sender === 'User' ? 'rounded-tr-lg' : 'rounded-tl-lg'}
               `}
@@ -660,37 +665,37 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                       {!msg.isStreaming && !isLoading && (
                         <>
                           {msg.responses && msg.responses.length > 1 && (
-                            <div className="flex items-center gap-1 bg-white/90 dark:bg-gray-800/90 rounded-lg p-0.5 sm:p-1 shadow-sm border border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center gap-1 action-button-group">
                               <button
                                 onClick={() => onNavigateResponse(msg.id, 'prev')}
                                 disabled={(msg.currentResponseIndex || 0) === 0}
-                                className="p-0.5 sm:p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                className="p-0.5 sm:p-1 nav-button rounded disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Previous response"
                               >
-                                <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-400" />
+                                <ChevronLeft className="w-3 h-3 sm:w-4 sm:h-4" />
                               </button>
 
-                              <span className="text-xs text-gray-500 dark:text-gray-400 px-1 sm:px-2 font-medium">
+                              <span className="text-xs nav-text px-1 sm:px-2 font-medium">
                                 {(msg.currentResponseIndex || 0) + 1} / {msg.responses.length}
                               </span>
 
                               <button
                                 onClick={() => onNavigateResponse(msg.id, 'next')}
                                 disabled={(msg.currentResponseIndex || 0) === (msg.responses?.length || 1) - 1}
-                                className="p-0.5 sm:p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                className="p-0.5 sm:p-1 nav-button rounded disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Next response"
                               >
-                                <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-400" />
+                                <ChevronRight className="w-3 h-3 sm:w-4 sm:h-4" />
                               </button>
                             </div>
                           )}
 
                           <button
                             onClick={() => onRegenerateResponse(msg.id)}
-                            className="p-1 sm:p-1.5 bg-white/90 dark:bg-gray-800/90 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 transition-all duration-200"
+                            className="p-1 sm:p-1.5 action-button"
                             title="Regenerate response"
                           >
-                            <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4 text-gray-600 dark:text-gray-400" />
+                            <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4" />
                           </button>
                         </>
                       )}
@@ -713,21 +718,16 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
 
                       {/* Message Text */}
                       {msg.text && (
-                        <div className="mb-3 last:mb-0">
+                        <div className="mb-3 last:mb-0 min-w-0">
                           {msg.sender === 'User' ? (
-                            <div className="whitespace-pre-wrap leading-relaxed text-sm sm:text-[15px]">{msg.text}</div>
+                            <div className="whitespace-pre-wrap break-words leading-relaxed text-sm sm:text-[15px] overflow-hidden">{msg.text}</div>
                           ) : msg.isStreaming ? (
-                            <StreamingText text={msg.text} isComplete={false} />
+                            <div className="min-w-0 overflow-hidden">
+                              <StreamingText text={msg.text} isComplete={false} />
+                            </div>
                           ) : (
-                            <div>
-                              <Streamdown
-                                  parseIncompleteMarkdown={true}
-                                  remarkPlugins={[remarkGfm, remarkMath]}
-                                  rehypePlugins={[rehypeKatex]}
-                                  shikiTheme={["github-dark", "github-dark"]}     
-                                   components={{ code: LLMCodeBlock as any }}
-
-                              >{normalizeFences(msg.text)}</Streamdown>
+                            <div className="min-w-0 overflow-hidden">
+                              <StreamingText text={msg.text} isComplete={true} />
                             </div>
                           )}
                         </div>
@@ -750,15 +750,15 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
             {/* User Message Actions Bar */}
             {msg.sender === 'User' && !msg.isEditing && (
               <div className="flex justify-end mt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                <div className="flex items-center gap-0.5 bg-white/95 dark:bg-gray-800/95 backdrop-blur-sm rounded-md px-1.5 py-0.5 shadow-sm border border-gray-200/50 dark:border-gray-700/50">
+                <div className="flex items-center gap-0.5 action-button-group">
                   {/* Copy Message Button */}
                   <button
                     onClick={() => navigator.clipboard.writeText(msg.text)}
-                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group"
+                    className="p-1 nav-button rounded group"
                     title="Copy message"
                   >
                     <svg
-                      className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300"
+                      className="w-3.5 h-3.5"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -776,17 +776,17 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                   {!isLoading && (
                     <button
                       onClick={() => onToggleEdit(msg.id)}
-                      className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group"
+                      className="p-1 nav-button rounded group"
                       title="Edit message"
                     >
-                      <Edit3 className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+                      <Edit3 className="w-3.5 h-3.5" />
                     </button>
                   )}
 
                   {/* Navigation for multiple versions */}
                   {((msg.edits && msg.edits.length > 1) || (msg.branches && msg.branches.length > 1)) && !isLoading && (
                     <>
-                      <div className="w-px h-3 bg-gray-300 dark:bg-gray-600 mx-0.5"></div>
+                      <div className="w-px h-3 nav-border mx-0.5"></div>
                       <button
                         onClick={() => onNavigateUserEdit(msg.id, 'prev')}
                         disabled={
@@ -794,13 +794,13 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                             ? (msg.currentEditIndex ?? msg.edits.length - 1) === 0
                             : (msg.currentBranchIndex ?? 0) === 0
                         }
-                        className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
+                        className="p-1 nav-button rounded group disabled:opacity-40 disabled:hover:bg-transparent"
                         title="Previous version"
                       >
-                        <ChevronLeft className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+                        <ChevronLeft className="w-3.5 h-3.5" />
                       </button>
 
-                      <span className="px-1.5 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-400">
+                      <span className="px-1.5 py-0.5 text-xs font-medium nav-text">
                         {msg.edits && msg.edits.length > 1
                           ? `${(msg.currentEditIndex ?? msg.edits.length - 1) + 1}/${msg.edits.length}`
                           : `${(msg.currentBranchIndex ?? 0) + 1}/${msg.branches?.length || 1}`}
@@ -813,10 +813,10 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
                             ? (msg.currentEditIndex ?? msg.edits.length - 1) === msg.edits.length - 1
                             : (msg.currentBranchIndex ?? 0) === (msg.branches?.length || 1) - 1
                         }
-                        className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors group disabled:opacity-40 disabled:hover:bg-transparent"
+                        className="p-1 nav-button rounded group disabled:opacity-40 disabled:hover:bg-transparent"
                         title="Next version"
                       >
-                        <ChevronRight className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300" />
+                        <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     </>
                   )}

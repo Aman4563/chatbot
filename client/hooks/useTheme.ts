@@ -9,25 +9,39 @@ export const useTheme = () => {
   const { websiteTheme } = useSelector((state: RootState) => state.settings);
   const [currentTheme, setCurrentTheme] = useState<Theme>('auto');
   const [isDark, setIsDark] = useState(false);
+  const [isClient, setIsClient] = useState(false);
+
+  // Check if we're on the client side
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
   // Get the actual applied theme (resolves 'auto' to light/dark)
   const getAppliedTheme = (theme: Theme): 'light' | 'dark' => {
     if (theme === 'auto') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      // Only access window on client side
+      if (typeof window !== 'undefined' && window.matchMedia) {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      // Default to light theme during SSR
+      return 'light';
     }
     return theme;
   };
 
   // Apply theme to DOM
   const applyTheme = (theme: Theme) => {
-    applyThemeToDOM(theme);
-    setIsDark(isDarkMode());
-    
-    console.log(`Theme applied: ${theme} -> ${getAppliedTheme(theme)}`);
+    // Only apply theme on client side
+    if (typeof window !== 'undefined') {
+      applyThemeToDOM(theme);
+      setIsDark(isDarkMode());
+    }
   };
 
   // Initialize theme from localStorage
   useEffect(() => {
+    if (!isClient) return; // Skip during SSR
+
     try {
       const saved = localStorage.getItem('chatbot-settings');
       if (saved) {
@@ -39,31 +53,34 @@ export const useTheme = () => {
     } catch (error) {
       console.warn('Failed to load theme from localStorage:', error);
     }
-  }, []);
+  }, [isClient]);
 
   // Apply theme when Redux state changes
   useEffect(() => {
+    if (!isClient) return; // Skip during SSR
+
     setCurrentTheme(websiteTheme);
     applyTheme(websiteTheme);
-  }, [websiteTheme]);
+  }, [websiteTheme, isClient]);
 
   // Listen for system theme changes when auto is selected
   useEffect(() => {
-    if (currentTheme === 'auto') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleChange = () => {
-        applyTheme('auto');
-      };
+    if (!isClient || currentTheme !== 'auto') return; // Skip during SSR or if not auto
 
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
-  }, [currentTheme]);
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      applyTheme('auto');
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, [currentTheme, isClient]);
 
   return {
     theme: currentTheme,
     isDark,
     appliedTheme: getAppliedTheme(currentTheme),
-    applyTheme
+    applyTheme,
+    isClient
   };
 };

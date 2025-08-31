@@ -479,22 +479,31 @@ const chatSlice = createSlice({
       }
     },
     createNewConversation: (state) => {
-      const newConversation: Conversation = {
-        id: generateId(),
-        title: 'New Chat',
-        messages: [],
-        model: state.selectedModel,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      state.conversations.unshift(newConversation);
-      state.activeConversationId = newConversation.id;
-      // Clear tool states when starting new conversation
-      state.generatedImageUrl = null;
-      state.imageError = null;
-      state.searchResults = [];
-      state.searchError = null;
-      state.activeTool = 'chat';
+      // Check if current active conversation has messages
+      const currentConversation = state.conversations.find(conv => conv.id === state.activeConversationId);
+      
+      // Only create a new conversation if:
+      // 1. There's no active conversation, OR
+      // 2. The current conversation has messages
+      if (!currentConversation || currentConversation.messages.length > 0) {
+        const newConversation: Conversation = {
+          id: generateId(),
+          title: 'New Chat',
+          messages: [],
+          model: state.selectedModel,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        state.conversations.unshift(newConversation);
+        state.activeConversationId = newConversation.id;
+        // Clear tool states when starting new conversation
+        state.generatedImageUrl = null;
+        state.imageError = null;
+        state.searchResults = [];
+        state.searchError = null;
+        state.activeTool = 'chat';
+      }
+      // If current conversation is empty, do nothing (user stays in the same empty conversation)
     },
     switchConversation: (state, action: PayloadAction<string>) => {
       state.activeConversationId = action.payload;

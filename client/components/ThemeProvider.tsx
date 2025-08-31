@@ -11,23 +11,12 @@ interface ThemeProviderProps {
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
   const { fontSize, compactMode } = useSelector((state: RootState) => state.settings);
-  const { theme, isDark, appliedTheme } = useTheme();
-
-  // Update debug indicator
-  const updateDebugIndicator = (theme: string) => {
-    const debugElement = document.getElementById('theme-debug');
-    if (debugElement) {
-      debugElement.textContent = `${theme} (${appliedTheme})`;
-    }
-  };
-
-  // Update debug indicator when theme changes
-  useEffect(() => {
-    updateDebugIndicator(theme);
-  }, [theme, appliedTheme]);
+  const { isClient } = useTheme();
 
   // Apply font size and compact mode
   useEffect(() => {
+    if (!isClient || typeof document === 'undefined') return; // Skip during SSR
+    
     const root = document.documentElement;
     
     // Apply font size
@@ -39,7 +28,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     } else {
       root.classList.remove('compact-mode');
     }
-  }, [fontSize, compactMode]);
+  }, [fontSize, compactMode, isClient]);
 
   return <>{children}</>;
 };
