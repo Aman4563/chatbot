@@ -1,0 +1,21 @@
+---
+description: Global rules for AI Chatbot repo — Always use gemini-2.0-flash model for testing anything. The .env has only gemini api key which is working as it's free. So for testing purposes we will use this one. Also below are the API keys names mentioned in the .env :-
+
+MISTRAL_API_KEY
+OPENAI_API_KEY
+ANTHROPIC_API_KEY
+GOOGLE_API_KEY
+
+HUGGINGFACE_API_KEY
+
+Llama_API_KEY
+Llama_parser_API_KEY
+OPENWEATHER_API_KEY
+SERPER_API_KEY
+
+The user hate having mock functionalities implemented instead of actual working functionalities so fix any but after confirmation only if they are already implemented within the code. Also the user don't like any kind of fallback so always fix the code so it actually work and return correct model response instead of fallback responses. 
+- 
+globs:
+  - "**/*"
+alwaysApply: true
+---

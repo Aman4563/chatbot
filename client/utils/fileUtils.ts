@@ -38,7 +38,8 @@ export const getFileIcon = (mimeType: string) => {
   // Code files
   if (mimeType.includes('javascript') || mimeType.includes('json') || 
       mimeType.includes('xml') || mimeType.includes('html') || 
-      mimeType.includes('css') || mimeType.includes('text/plain')) return FileCode;
+      mimeType.includes('css') || mimeType.includes('text/plain') ||
+      mimeType.includes('text/x-python') || mimeType.includes('text/markdown')) return FileCode;
   
   // Archive files
   if (mimeType.includes('zip') || mimeType.includes('rar') || 
@@ -78,7 +79,8 @@ export const getFileTypeColor = (mimeType: string): { bg: string; text: string; 
     
   if (mimeType.includes('javascript') || mimeType.includes('json') || 
       mimeType.includes('xml') || mimeType.includes('html') || 
-      mimeType.includes('css')) 
+      mimeType.includes('css') || mimeType.includes('text/x-python') || 
+      mimeType.includes('text/markdown')) 
     return { bg: 'from-yellow-500 to-amber-600', text: 'text-yellow-600', border: 'border-yellow-200' };
     
   if (mimeType.includes('zip') || mimeType.includes('rar') || 

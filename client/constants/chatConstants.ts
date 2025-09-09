@@ -5,14 +5,20 @@ export const CHAT_CONSTANTS = {
   // File handling
   MAX_FILE_SIZE: 10 * MB, // 10MB
   ALLOWED_FILE_TYPES: [
-    // Images
-    'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-    // Text files
-    'text/plain', 'text/csv', 'application/json',
-    // Documents
+    // Images - expanded to match backend
+    'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff',
+    // Text files - expanded to match backend
+    'text/plain', 'text/csv', 'text/markdown', 'text/xml', 'application/json', 'application/xml',
+    // Documents - expanded to include Excel and PowerPoint
     'application/pdf', 
     'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    // Programming files - new support
+    'text/x-python', 'application/javascript', 'text/html', 'text/css'
   ] as const,
   
   // UI constants

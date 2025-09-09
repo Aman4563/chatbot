@@ -8,7 +8,7 @@ interface UseChatHandlersProps {
   activeConversationId: string | null;
   input: string;
   selectedFiles: FileData[];
-  setSelectedFiles: (files: FileData[]) => void;
+  setSelectedFiles: React.Dispatch<React.SetStateAction<FileData[]>>;
   setInput: (value: string) => void;
 }
 

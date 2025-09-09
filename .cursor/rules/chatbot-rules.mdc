@@ -1,0 +1,167 @@
+---
+description: Global rules for AI Chatbot repo — fully implement features, refactor backend to LangGraph, add agents/tools, and keep code consistent, typed, and production-ready.
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Working Agreement (Always Apply)
+- **Implement, don’t scaffold.** When the user asks for a change or feature, write complete working code (no TODOs / placeholders). If any API shape is uncertain, do a quick web check and adjust accordingly.
+- **Propose options first.** Before large changes, briefly list 1–3 viable approaches (trade-offs: complexity, latency, cost, maintainability). If the user chooses one, implement that; otherwise implement the user’s original ask.
+- **Match existing style.** Read the repo entry points (`Server/main.py`, `model.py`, `schemas.py`, etc.) and keep naming, imports, logging, error strategy, and folder structure consistent. Prefer incremental refactors that keep routes stable unless asked.
+- **Comments are minimal and useful.** Only add comments/docstrings that explain purpose, inputs/outputs, tricky logic, or constraints. Avoid obvious narration.
+- **Type everything.** Use Python type hints throughout, Pydantic models for I/O, and keep mypy/ruff/black happy.
+- **Async first.** Prefer `async` FastAPI routes, `httpx.AsyncClient`, and streaming where relevant.
+- **Secrets & safety.** Never log API keys or prompts with secrets; load from environment; validate inputs; add simple rate-limit/backoff where it matters.
+
+---
+
+# Architecture Refactor: LangGraph (Replace LangChain graphs when applicable)
+- **Create a LangGraph state model** using `TypedDict`/`pydantic.BaseModel`:
+  - `user_input: str`, `messages: list[dict]`, `selected_provider: str | None`, `tools: list[str]`, `attachments: list | None`, `web_results: list | None`, `image_tasks: list | None`, `response_mode: Literal["text","stream","image"]`, `metadata: dict`.
+- **Nodes** (implement as pure functions/classes):
+  1. `ingest_input` → normalize request, validate schema.
+  2. `route_provider` → choose provider/model by policy (see “Provider Routing”).
+  3. `invoke_llm` → call chosen provider with retries/stream support.
+  4. `maybe_web_search` → run search/RAG when user asks or the router flags it.
+  5. `maybe_image_gen` → run image generation when requested.
+  6. `tool_exec` → execute enabled tools (structured tools/functions).
+  7. `compose_reply` → merge tool results / model output; prepare streaming chunks or final JSON.
+- **Edges**
+  - `ingest_input -> route_provider -> (invoke_llm)`; conditional edges to `maybe_web_search` and/or `maybe_image_gen` and then to `compose_reply`.
+- **Streaming**: Support token streaming from providers; surface via FastAPI `EventSourceResponse` (SSE) or WebSocket.
+- **Memory**: Keep short-term memory in `state["messages"]`; leave long-term memory pluggable (vector store) but do not invent one unless asked.
+
+---
+
+# Provider Abstraction (multi-LLM, swappable backends)
+- Implement a thin `LLMProvider` protocol:
+  ```python
+  class LLMProvider(Protocol):
+      async def generate(self, messages: list[dict], **kw) -> str: ...
+      async def stream(self, messages: list[dict], **kw) -> AsyncIterator[str]: ...
+      def supports_tools(self) -> bool: ...
+  ```
+
+* Provide adapters for at least: OpenAI, Anthropic, Google, and a “local/others” slot.
+
+  * Use official SDKs when possible; otherwise `httpx` with well-typed request/response models.
+  * Implement **tool / function-calling** translation where the provider supports it.
+* **Provider routing policy**:
+
+  * Choose model by **capability** (tools/vision), **cost/latency budget**, and **system load**.
+  * If user specifies a provider/model, **honor it**. Else apply default policy.
+  * Add **retry with fallback**: on provider error/timeouts → fail over to the next compatible provider; record telemetry.
+* **Configuration**:
+
+  * Load keys from env (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.).
+  * Centralize model choices and per-provider params in `config/models.py`.
+
+---
+
+# Tools & Agents
+
+* **Define tools** as small, typed, side-effect-free units with clear I/O (Pydantic models).
+
+  * `WebSearchTool(query: str, k: int=8) -> list[SearchResult]`
+  * `ImageGenTool(prompt: str, size: str="1024x1024") -> ImageRef`
+  * Add additional tools (retrieval, calculators, URLs fetch) only when requested.
+* **Agent orchestration with LangGraph**:
+
+  * Keep a **single graph** with conditional paths rather than many small graphs unless complexity demands otherwise.
+  * Prefer **deterministic tool routing** when confidence is high; otherwise allow the model to select tools via structured tool calls.
+
+---
+
+# Web Search / Retrieval
+
+* If search is requested or the query is “webby”, run `WebSearchTool` then **ground** the answer with citations.
+* Keep the retrieval layer pluggable (Tavily/SerpAPI/Bing). Add a simple in-memory cache keyed by query to avoid duplicate calls.
+
+---
+
+# Image Generation
+
+* Support at least one image backend (e.g., OpenAI Images or Stability). Return a stable reference/URL and optionally a base64 payload if asked.
+
+---
+
+# FastAPI Surface (Server)
+
+* **Routes**:
+
+  * `POST /chat` → unified chat endpoint (text+tools), supports `stream=true` for SSE.
+  * `POST /image` → image gen.
+  * `POST /search` → (optional) explicit web search endpoint.
+* **Schemas** (`schemas.py`):
+
+  * `ChatRequest{ messages, provider?, model?, tools?, stream?, metadata? }`
+  * `StreamEvent{ type, data }` for SSE; `ChatResponse{ text, citations?, usage?, provider }` for non-stream.
+* **Errors**: Map provider/validation errors to `HTTPException` with clear messages (never expose raw keys).
+* **Logging/Tracing**: Structured logs with `request_id`, provider, latency, tokens, and fallback reason.
+
+---
+
+# Quality Gates
+
+* **Testing**: Add/maintain `pytest` tests for routers, provider adapters (use VCR or stub clients), and graph flows. Include at least 1 streaming test.
+* **Lint/Format**: Keep `ruff` & `black` clean; run quick fixes when safe.
+* **Performance**: Use `asyncio.gather` where parallelism helps (e.g., multiple tool calls). Cache provider clients.
+* **Rate/Retry**: Use `tenacity` with exponential backoff and jitter on provider calls.
+
+---
+
+# Implementation Defaults
+
+* **Dependencies** (update `requirements.txt` as needed):
+
+  * `fastapi`, `uvicorn[standard]`, `httpx`, `pydantic>=2`, `langgraph`, `langchain-core`, `langchain-community`
+  * Provider SDKs as used (e.g., `openai`, `anthropic`, `google-generativeai`)
+  * `tenacity`, `python-dotenv`, `sse-starlette`, `ruff`, `black`, `pytest`
+* **Project layout** (prefer, and migrate toward if significantly different):
+
+  ```
+  Server/
+    main.py            # FastAPI app & routes
+    config/models.py   # provider/model registry & defaults
+    providers/         # openai.py, anthropic.py, google.py, base.py
+    tools/             # web_search.py, image_gen.py, ...
+    graphs/            # chat_graph.py (LangGraph)
+    services/          # orchestration helpers
+    schemas.py
+    logger.py
+  client/              # (front-end)
+  ```
+* **Naming**: snake\_case for files, CamelCase for classes, verbs for functions.
+
+---
+
+# When the User Asks for a Change (step-by-step)
+
+1. **Understand request & context** (skim relevant files).
+2. **Offer 1–3 approaches** (succinct trade-offs). If the user picks one, follow it; if not, implement their exact request.
+3. **Implement fully**:
+
+   * Update graph nodes/edges and provider adapters as needed.
+   * Update schemas and routes to keep API stable (or note breaking changes).
+   * Add/adjust tests and requirements.
+4. **Validate**: run self-checks (types, imports, simple local runs if examples exist).
+5. **Return concrete diff/code blocks** that can be pasted, plus minimal migration notes.
+
+---
+
+# Do / Don’t
+
+* **Do** keep prompts/config centralized and versioned; **don’t** scatter literals.
+* **Do** stream when asked; **don’t** buffer an entire reply if streaming is enabled.
+* **Do** respect explicit provider/model choices; **don’t** silently override them.
+* **Do** redact secrets in logs; **don’t** print tokens/keys.
+
+---
+
+---
+description: Global rules for AI Chatbot repo — Always use gemini-2.0-flash model for testing anything. The .env has only gemini api key which is working as it's free. So for testing purposes we will use this one.
+globs:
+  - "**/*"
+alwaysApply: true
+---

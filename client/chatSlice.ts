@@ -1,6 +1,7 @@
 // chatSlice.ts - Complete updated version with all fixes
 
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
+import { collectBrowserMetadata, BrowserMetadata } from './utils/metadataUtils';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
@@ -93,6 +94,36 @@ const initialState: ChatState = {
 };
 
 const generateId = () => Date.now().toString() + Math.random().toString(36).substr(2, 9);
+
+// ✅ ENHANCED SMOOTH STREAMING: Creates natural streaming effect for optimal user experience
+const createSmoothStreamingEffect = async (chunk: string, dispatch: any, appendToLastBotMessage: any) => {
+  // For very short chunks, dispatch immediately
+  if (chunk.length <= 3) {
+    dispatch(appendToLastBotMessage(chunk));
+    return;
+  }
+  
+  // For longer chunks, create natural streaming effect
+  if (chunk.length > 3) {
+    // Break down into words for natural feel
+    const words = chunk.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (word.trim()) {
+        // Add word with space (except last word)
+        const wordToAdd = i < words.length - 1 ? word + ' ' : word;
+        
+        // Dispatch word immediately
+        dispatch(appendToLastBotMessage(wordToAdd));
+        
+        // Create very short delay for natural feel (much shorter than before)
+        if (i < words.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 8)); // 8ms delay between words
+        }
+      }
+    }
+  }
+};
 
 const formatHistoryForAPI = (messages: Message[]) => {
   return messages.map(msg => ({
@@ -219,7 +250,16 @@ export const sendChatMessageStream = createAsyncThunk(
     const currentConversation = conversations.find(conv => conv.id === activeConversationId);
     const history = currentConversation ? formatHistoryForAPI(currentConversation.messages) : [];
 
-    console.log('Sending chat message:', { message, files, selectedModel, history });
+    // Collect browser metadata
+    let metadata: BrowserMetadata | null = null;
+    try {
+      metadata = await collectBrowserMetadata();
+      console.log('Collected browser metadata:', metadata);
+    } catch (error) {
+      console.warn('Failed to collect browser metadata:', error);
+    }
+
+    console.log('Sending chat message:', { message, files, selectedModel, history, metadata });
 
     const response = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
@@ -232,8 +272,19 @@ export const sendChatMessageStream = createAsyncThunk(
           files: files
         },
         history: history,
-        system_prompt: "You are an AI assistant specialized in generating mathematical content and LaTeX expressions. Always produce mathematical notation using LaTeX in a rendering-friendly format. Use `$...$` for inline math and `$$...$$` for display equations, ensuring there are no unnecessary spaces inside the delimiters (for example, write `$E=mc^2$` instead of `$ E = mc^2 $`). Never enclose LaTeX expressions inside Markdown code blocks (triple backticks), unless explicitly requested, since this breaks proper rendering. Follow standard LaTeX conventions for clarity: use `\frac{a}{b}` instead of `a/b` for fractions, `\cdot` instead of `*` for multiplication, `\text{}` to insert readable text inside math mode, and appropriate commands like `\sum`, `\int`, and `\sqrt{}` for summations, integrals, and roots. Always check the logical correctness of your LaTeX output and mentally verify that it would compile without syntax errors. For multi-line or complex equations, prefer `$$...$$` formatting and break down expressions clearly for readability. If the rendering environment does not properly display LaTeX, instruct the user to copy the raw LaTeX string into an external renderer such as Overleaf, TeXPage, MathJax, or another LaTeX-compatible editor for validation. Provide fallback explanations or plain-text equivalents when necessary to avoid ambiguity. Your goal is to consistently generate mathematically correct, well-structured, and clean LaTeX expressions that maximize compatibility across different rendering environments.",
-        model_name: selectedModel
+        conversation_id: activeConversationId, // Send conversation ID for context
+        session_id: activeConversationId, // Use conversation ID as session ID for now
+        system_prompt: "You are a helpful AI assistant with vision and document analysis capabilities. When analyzing images, describe what you see in detail. When analyzing documents, provide summaries and key insights. When the user asks you to generate mathematical content, always produce mathematical notation using LaTeX in a rendering-friendly format. Use `$...$` for inline math and `$$...$$` for display equations, ensuring there are no unnecessary spaces inside the delimiters (for example, write `$E=mc^2$` instead of `$ E = mc^2 $`). Never enclose LaTeX expressions inside Markdown code blocks (triple backticks), unless explicitly requested, since this breaks proper rendering. Follow standard LaTeX conventions for clarity: use `\frac{a}{b}` instead of `a/b` for fractions, `\cdot` instead of `*` for multiplication, `\text{}` to insert readable text inside math mode, and appropriate commands like `\sum`, `\int`, and `\sqrt{}` for summations, integrals, and roots. Always check the logical correctness of your LaTeX output and mentally verify that it would compile without syntax errors. For multi-line or complex equations, prefer `$$...$$` formatting and break down expressions clearly for readability. If the rendering environment does not properly display LaTeX, instruct the user to copy the raw LaTeX string into an external renderer such as Overleaf, TeXPage, MathJax, or another LaTeX-compatible editor for validation. Provide fallback explanations or plain-text equivalents when necessary to avoid ambiguity. Your goal is when user asked you to generate mathematical content to consistently generate mathematically correct, well-structured, and clean LaTeX expressions that maximize compatibility across different rendering environments.",
+        model_name: selectedModel,
+        // Include metadata for enhanced search and responses
+        metadata: metadata ? {
+          timezone: metadata.timezone,
+          language: metadata.language,
+          platform: metadata.platform,
+          screen_resolution: metadata.screenResolution,
+          location: metadata.location,
+          consent: metadata.consent
+        } : undefined
       }),
     });
 
@@ -260,12 +311,10 @@ export const sendChatMessageStream = createAsyncThunk(
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
-                // Dispatch chunk immediately for real-time streaming
-                dispatch(appendToLastBotMessage(data.chunk));
-                // Small delay to ensure UI updates smoothly
-                await new Promise(resolve => setTimeout(resolve, 5));
-              } else if (data.done) {
+                              if (data.chunk) {
+                  // ✅ ENHANCED SMOOTH STREAMING: Create natural streaming effect for optimal user experience
+                  await createSmoothStreamingEffect(data.chunk, dispatch, appendToLastBotMessage);
+                } else if (data.done) {
                 dispatch(finishStreaming());
                 return 'Streaming completed';
               }
@@ -318,6 +367,8 @@ export const regenerateFromMessage = createAsyncThunk(
           files: files
         },
         history: history,
+        conversation_id: activeConversationId, // Send conversation ID for context
+        session_id: activeConversationId, // Use conversation ID as session ID for now
         system_prompt: "You are a helpful AI assistant with vision and document analysis capabilities. When analyzing images, describe what you see in detail. When analyzing documents, provide summaries and key insights.",
         model_name: selectedModel
       }),
@@ -346,9 +397,10 @@ export const regenerateFromMessage = createAsyncThunk(
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
-                dispatch(appendToLastBotMessage(data.chunk));
-              } else if (data.done) {
+                              if (data.chunk) {
+                  // ✅ ENHANCED SMOOTH STREAMING: Create natural streaming effect for optimal user experience
+                  await createSmoothStreamingEffect(data.chunk, dispatch, appendToLastBotMessage);
+                } else if (data.done) {
                 dispatch(finishStreaming());
                 return 'Regeneration completed';
               }
@@ -404,6 +456,8 @@ export const regenerateResponse = createAsyncThunk(
           files: userMessage.files || []
         },
         history: history,
+        conversation_id: activeConversationId, // Send conversation ID for context
+        session_id: activeConversationId, // Use conversation ID as session ID for now
         system_prompt: "You are a helpful AI assistant with vision and document analysis capabilities. When analyzing images, describe what you see in detail. When analyzing documents, provide summaries and key insights.",
         model_name: selectedModel
       }),
@@ -431,9 +485,11 @@ export const regenerateResponse = createAsyncThunk(
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.chunk) {
-                newResponseText += data.chunk;
-              } else if (data.done) {
+                              if (data.chunk) {
+                  // ✅ ENHANCED SMOOTH STREAMING: Create natural streaming effect for optimal user experience
+                  await createSmoothStreamingEffect(data.chunk, dispatch, appendToLastBotMessage);
+                  newResponseText += data.chunk;
+                } else if (data.done) {
                 dispatch(addResponseVersion({ messageId, newResponse: newResponseText }));
                 return 'Regeneration completed';
               }

@@ -1,0 +1,15 @@
+warning: in the working copy of 'Server/model.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'Server/requirements.txt', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/Component/Chat.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/hooks/useChatHandlers.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/package-lock.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/utils/fileUtils.ts', LF will be replaced by CRLF the next time Git touches it
+Server/main.py
+Server/model.py
+Server/modelXwithbettercode.py
+Server/requirements.txt
+client/Component/Chat.tsx
+client/constants/chatConstants.ts
+client/hooks/useChatHandlers.ts
+client/package-lock.json
+client/utils/fileUtils.ts

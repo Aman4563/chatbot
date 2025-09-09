@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Location Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 10px 5px;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        .success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        .info {
+            background: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ Enhanced Location Test</h1>
+        <p>This page tests the enhanced Browser Geolocation API implementation with accuracy reporting and session caching.</p>
+        
+        <div>
+            <button onclick="testLocation()">📍 Get Location (High Accuracy)</button>
+            <button onclick="testCachedLocation()">💾 Get Cached Location</button>
+            <button onclick="clearCache()">🗑️ Clear Cache</button>
+            <button onclick="testPermission()">🔐 Check Permission</button>
+        </div>
+
+        <div id="result" class="result info">
+            Click a button above to test the enhanced location functionality.
+        </div>
+
+        <h3>Features Tested:</h3>
+        <ul>
+            <li>✅ High accuracy GPS location</li>
+            <li>✅ Accuracy radius reporting (meters)</li>
+            <li>✅ Session caching (5 minutes)</li>
+            <li>✅ Fallback to network location</li>
+            <li>✅ Enhanced error handling</li>
+            <li>✅ Permission status checking</li>
+        </ul>
+    </div>
+
+    <script>
+        // Enhanced location functions (copied from metadataUtils.ts)
+        let locationCache = {
+            data: null,
+            timestamp: 0
+        };
+        const LOCATION_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+        async function getLocationWithPermission(forceRefresh = false) {
+            if (!navigator.geolocation) {
+                throw new Error('Geolocation is not supported by this browser');
+            }
+
+            // Check cache first (unless force refresh)
+            if (!forceRefresh && locationCache.data && (Date.now() - locationCache.timestamp) < LOCATION_CACHE_DURATION) {
+                console.log('Using cached location data');
+                return locationCache.data;
+            }
+
+            try {
+                // Try high accuracy first
+                const position = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: true,    // Use GPS if available
+                        timeout: 15000,              // Increased timeout for better accuracy
+                        maximumAge: 60000           // Accept cached data up to 1 minute old
+                    });
+                });
+
+                const locationData = {
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    accuracy: position.coords.accuracy,
+                    altitude: position.coords.altitude,
+                    altitudeAccuracy: position.coords.altitudeAccuracy,
+                    heading: position.coords.heading,
+                    speed: position.coords.speed,
+                    timestamp: position.timestamp,
+                    source: 'geolocation-high-accuracy'
+                };
+
+                // Cache the result
+                locationCache = {
+                    data: locationData,
+                    timestamp: Date.now()
+                };
+
+                return locationData;
+
+            } catch (error) {
+                console.warn('High accuracy location failed, trying fallback:', error);
+                
+                // Fallback to lower accuracy if high accuracy fails
+                try {
+                    const position = await new Promise((resolve, reject) => {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, {
+                            enableHighAccuracy: false,  // Use network-based location
+                            timeout: 10000,             // Shorter timeout for fallback
+                            maximumAge: 300000          // Accept older cached data
+                        });
+                    });
+
+                    const locationData = {
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy,
+                        altitude: position.coords.altitude,
+                        altitudeAccuracy: position.coords.altitudeAccuracy,
+                        heading: position.coords.heading,
+                        speed: position.coords.speed,
+                        timestamp: position.timestamp,
+                        source: 'geolocation-network'
+                    };
+
+                    // Cache the result
+                    locationCache = {
+                        data: locationData,
+                        timestamp: Date.now()
+                    };
+
+                    return locationData;
+
+                } catch (fallbackError) {
+                    throw new Error('All location methods failed: ' + fallbackError.message);
+                }
+            }
+        }
+
+        function clearLocationCache() {
+            locationCache = {
+                data: null,
+                timestamp: 0
+            };
+        }
+
+        function getCachedLocation() {
+            if (locationCache.data && (Date.now() - locationCache.timestamp) < LOCATION_CACHE_DURATION) {
+                return locationCache.data;
+            }
+            return null;
+        }
+
+        async function checkLocationPermission() {
+            if (!navigator.permissions) {
+                return false;
+            }
+
+            try {
+                const permission = await navigator.permissions.query({ name: 'geolocation' });
+                return permission.state === 'granted';
+            } catch (error) {
+                return false;
+            }
+        }
+
+        // Test functions
+        async function testLocation() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result info';
+            resultDiv.textContent = '🔄 Requesting location...';
+
+            try {
+                const location = await getLocationWithPermission(true);
+                const age = Math.round((Date.now() - locationCache.timestamp) / 1000);
+                
+                resultDiv.className = 'result success';
+                resultDiv.textContent = `✅ Location obtained successfully!
+
+📍 Coordinates: ${location.latitude.toFixed(8)}, ${location.longitude.toFixed(8)}
+🎯 Accuracy: ${location.accuracy ? location.accuracy.toFixed(1) + ' meters' : 'Unknown'}
+📡 Source: ${location.source}
+⏰ Timestamp: ${new Date(location.timestamp).toLocaleString()}
+💾 Cache Age: ${age} seconds
+
+Additional Data:
+• Altitude: ${location.altitude ? location.altitude.toFixed(1) + 'm' : 'N/A'}
+• Altitude Accuracy: ${location.altitudeAccuracy ? location.altitudeAccuracy.toFixed(1) + 'm' : 'N/A'}
+• Heading: ${location.heading ? location.heading.toFixed(1) + '°' : 'N/A'}
+• Speed: ${location.speed ? location.speed.toFixed(1) + ' m/s' : 'N/A'}`;
+
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = `❌ Location request failed: ${error.message}`;
+            }
+        }
+
+        async function testCachedLocation() {
+            const resultDiv = document.getElementById('result');
+            const cached = getCachedLocation();
+            
+            if (cached) {
+                const age = Math.round((Date.now() - locationCache.timestamp) / 1000);
+                resultDiv.className = 'result success';
+                resultDiv.textContent = `💾 Cached location found!
+
+📍 Coordinates: ${cached.latitude.toFixed(8)}, ${cached.longitude.toFixed(8)}
+🎯 Accuracy: ${cached.accuracy ? cached.accuracy.toFixed(1) + ' meters' : 'Unknown'}
+📡 Source: ${cached.source}
+⏰ Timestamp: ${new Date(cached.timestamp).toLocaleString()}
+💾 Cache Age: ${age} seconds`;
+            } else {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ No cached location found. Please get location first.';
+            }
+        }
+
+        function clearCache() {
+            clearLocationCache();
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = 'result info';
+            resultDiv.textContent = '🗑️ Location cache cleared successfully!';
+        }
+
+        async function testPermission() {
+            const resultDiv = document.getElementById('result');
+            const hasPermission = await checkLocationPermission();
+            
+            resultDiv.className = hasPermission ? 'result success' : 'result error';
+            resultDiv.textContent = hasPermission ? 
+                '✅ Location permission is granted!' : 
+                '❌ Location permission is not granted. Please grant permission to test location features.';
+        }
+    </script>
+</body>
+</html>

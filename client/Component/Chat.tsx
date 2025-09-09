@@ -192,6 +192,16 @@ const Chat: React.FC = () => {
       {/* Error Display */}
       {error && <ErrorDisplay error={error} />}
 
+      {/* Hidden File Input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,text/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/json,application/xml,text/x-python,application/javascript,text/html,text/css"
+        style={{ display: 'none' }}
+        onChange={handleInputChange}
+      />
+
       {/* Input Area */}
       <ChatInput
         input={input}

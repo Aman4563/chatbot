@@ -128,15 +128,7 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
     (state: RootState) => state.settings
   );
 
-  // Inline: never run Shiki to avoid conflicts with single backticks
-  if (inline || !/language-/.test(className || "")) {
-    return (
-      <code className="rounded px-1.5 py-0.5 font-mono text-[0.9em] code-inline">
-        {children}
-      </code>
-    );
-  }
-
+  // ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS
   const raw = useMemo(() => String(children ?? ""), [children]);
   const meta = (rest as any)?.["data-meta"] ?? node?.meta ?? "";
   const { lang, title } = useMemo(() => parseInfo(className, meta), [className, meta]);
@@ -260,6 +252,15 @@ export function LLMCodeBlock({ inline, className, children, node, ...rest }: Cod
   // Mermaid-specific memoized values (always computed, but only used for mermaid)
   const mermaidTheme = useMemo(() => getMermaidTheme(), [websiteTheme]);
   const cleanedMermaid = useMemo(() => raw, [raw]);
+
+  // Inline: never run Shiki to avoid conflicts with single backticks
+  if (inline || !/language-/.test(className || "")) {
+    return (
+      <code className="rounded px-1.5 py-0.5 font-mono text-[0.9em] code-inline">
+        {children}
+      </code>
+    );
+  }
 
   // --- MERMAID RENDER PATH ---------------------------------------------------
   if (mappedLang === "mermaid") {
