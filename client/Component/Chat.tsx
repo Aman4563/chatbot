@@ -1,4 +1,3 @@
-// Chat.tsx - Fixed version with proper LLM-style markdown rendering
 import React, { useRef, useEffect, useState } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import ReactMarkdown from 'react-markdown';
@@ -6,38 +5,31 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import 'highlight.js/styles/atom-one-dark.css';
 import { visit } from 'unist-util-visit';
-
-import { 
-  Send, 
-  Paperclip, 
-  X, 
-  Image, 
-  FileText, 
-  File, 
-  Download,
-  MessageCircle,
-  Bot,
-  User,
-  AlertCircle,
-  Upload,
-  Plus,
-  Copy,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  MessageSquare
-} from 'lucide-react';
-import { AppDispatch, RootState } from '../store';
-import { 
-  setInput, 
-  sendChatMessageStream, 
-  addMessage, 
+import { ImageWithHistory } from './ImageWithHistory';
+import {
+  setInput,
+  sendChatMessageStream,
+  addMessage,
   createNewConversation,
+  toggleMessageEdit,
+  regenerateFromMessage,
+  navigateResponseVersion,
+  regenerateResponse,
   FileData,
-  Message 
+  Message,
+  navigateUserEditVersion,
+  setUserBranchIndex,
+  replaceConversationTail,
+  webSearch,
+  generateImage,
+  updateMessageText,
+  addImageToHistory,
 } from '../chatSlice';
+import { AlertCircle, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, Edit3, File, FileText, Image, MessageCircle, MessageSquare, Paperclip, Plus, RotateCcw, Send, Upload, User, X, Eye } from 'lucide-react';
+import { AppDispatch } from '@/store';
+import { RootState } from '@reduxjs/toolkit/query';
 
-function rehypeStripHljs() {                       // ← ADD THIS
+function rehypeStripHljs() {
   return (tree: any) => {
     visit(tree, 'element', (node: any) => {
       if (
@@ -54,10 +46,25 @@ function rehypeStripHljs() {                       // ← ADD THIS
 
 const Chat = () => {
   const dispatch = useDispatch<AppDispatch>();
-  const { conversations, activeConversationId, input, isLoading, error, selectedModel } = useSelector(
-    (state: RootState) => state.chat
-  );
-  
+  const {
+    conversations,
+    activeConversationId,
+    input,
+    isLoading,
+    error,
+    selectedModel,
+    availableModels,
+    searchResults,
+    searchLoading,
+    searchError,
+    generatedImageUrl,
+    imageLoading,
+    imageError,
+    imageHistory,
+    currentImageIndex
+
+  } = useSelector((state: RootState) => state.chat);
+
   const [selectedFiles, setSelectedFiles] = useState<FileData[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string>('');
@@ -66,9 +73,150 @@ const Chat = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [activeTool, setActiveTool] = useState<'chat' | 'search' | 'image'>('chat');
+
+
 
   const activeConversation = conversations.find(conv => conv.id === activeConversationId);
 
+  // Search handler
+  const handleSearch = async () => {
+    if (!input.trim() || !activeConversationId) return;
+
+    dispatch(addMessage({
+      conversationId: activeConversationId,
+      message: {
+        id: Date.now().toString(),
+        sender: 'User',
+        text: input,
+        timestamp: new Date().toISOString(),
+      },
+    }));
+
+    try {
+      const results: string[] = await dispatch(webSearch({ query: input })).unwrap();
+      const md = results.map((url, i) => `- [${url}](${url})`).join('\n');
+      dispatch(addMessage({
+        conversationId: activeConversationId,
+        message: {
+          id: (Date.now() + 1).toString(),
+          sender: 'Bot',
+          text: `**Search Results**\n\n${md}`,
+          timestamp: new Date().toISOString(),
+        },
+      }));
+    } catch (e) {
+      console.error('Search failed:', e);
+    } finally {
+      dispatch(setInput(''));
+    }
+  };
+
+  // ✅ FIXED Image generation handler with comprehensive validation
+  const handleGenerateImage = async () => {
+    if (!input.trim() || !activeConversationId) return;
+
+    // 1) re-add the user’s message…
+    dispatch(addMessage({
+      conversationId: activeConversationId,
+      message: {
+        id: Date.now().toString(),
+        sender: 'User',
+        text: input,
+        timestamp: new Date().toISOString(),
+      },
+    }));
+
+    // 2) insert a “Generating…” placeholder
+    const loadingId = (Date.now() + 1).toString();
+    dispatch(addMessage({
+      conversationId: activeConversationId,
+      message: {
+        id: loadingId,
+        sender: 'Bot',
+        text: '🖼️ Generating image…',
+        timestamp: new Date().toISOString(),
+      },
+    }));
+
+    dispatch(setInput(''));  // clear input
+
+
+
+    try {
+      // 3) call the thunk and pull out `.url` if needed
+      const url: string = await dispatch(generateImage({ prompt: input })).unwrap();
+
+
+      console.log('🖼️ generateImage payload →', url);
+
+      // tell the slice to append it to history
+      dispatch(addImageToHistory({ prompt: input, url }));
+      const markdown = `![Generated Image](${url})\n\n*Prompt: "${input}"*`;
+
+      // 5) replace the loading message
+      dispatch(updateMessageText({
+        conversationId: activeConversationId,
+        messageId: loadingId,
+        newText: markdown,
+      }));
+    } catch (err: any) {
+      console.error(err);
+      dispatch(updateMessageText({
+        conversationId: activeConversationId,
+        messageId: loadingId,
+        newText: `❌ Image generation failed: ${err.message}`,
+      }));
+    }
+  };
+
+
+  // Other handlers (keeping your existing ones)
+  const handleNavigateUserEdit = (messageId: string, direction: 'prev' | 'next') => {
+    const conv = conversations.find(c => c.id === activeConversationId);
+    if (!conv) return;
+
+    const idx = conv.messages.findIndex(m => m.id === messageId && m.sender === 'User');
+    if (idx < 0) return;
+    const userMsg = conv.messages[idx];
+
+    const oldEditIndex = userMsg.currentEditIndex ?? 0;
+    let newEditIndex = direction === 'prev' ? oldEditIndex - 1 : oldEditIndex + 1;
+    newEditIndex = Math.max(0, Math.min((userMsg.edits?.length ?? 1) - 1, newEditIndex));
+    const newText = userMsg.edits![newEditIndex];
+
+    dispatch(navigateUserEditVersion({ messageId, direction }));
+
+    const oldBranch = userMsg.currentBranchIndex ?? 0;
+    let newBranch = direction === 'prev' ? oldBranch - 1 : oldBranch + 1;
+    newBranch = Math.max(0, Math.min((userMsg.branches?.length ?? 1) - 1, newBranch));
+    dispatch(setUserBranchIndex({ messageId, branchIndex: newBranch }));
+
+    const head = [
+      ...conv.messages.slice(0, idx),
+      { ...userMsg, text: newText }
+    ];
+    const tail = userMsg.branches ? userMsg.branches[newBranch] : [];
+    dispatch(replaceConversationTail({
+      conversationId: activeConversationId!,
+      head,
+      tail
+    }));
+  };
+
+  const handleNavigateResponse = (messageId: string, direction: 'prev' | 'next') => {
+    dispatch(navigateResponseVersion({ messageId, direction }));
+  };
+
+  const handleRegenerateResponse = async (messageId: string) => {
+    try {
+      await dispatch(regenerateResponse(messageId)).unwrap();
+    } catch (error) {
+      console.error('Failed to regenerate response:', error);
+    }
+  };
+
+  // useEffect hooks
   useEffect(() => {
     if (conversations.length === 0) {
       dispatch(createNewConversation());
@@ -79,7 +227,6 @@ const Chat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeConversation?.messages]);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -87,7 +234,7 @@ const Chat = () => {
     }
   }, [input]);
 
-  // Copy to clipboard function
+  // Utility functions
   const copyToClipboard = async (text: string, blockId: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -98,7 +245,6 @@ const Chat = () => {
     }
   };
 
-  // Toggle code block collapse
   const toggleCodeBlock = (blockId: string) => {
     setCollapsedBlocks(prev => {
       const newSet = new Set(prev);
@@ -111,22 +257,21 @@ const Chat = () => {
     });
   };
 
-  // Copy entire chat as markdown
   const copyChatAsMarkdown = async () => {
     if (!activeConversation) return;
-    
+
     const chatMarkdown = activeConversation.messages.map(msg => {
       const sender = msg.sender === 'User' ? '**You**' : '**Xbot**';
       const timestamp = new Date(msg.timestamp).toLocaleString();
       let content = `${sender} (${timestamp}):\n\n${msg.text || ''}`;
-      
+
       if (msg.files && msg.files.length > 0) {
         content += '\n\n*Attachments:*\n';
         msg.files.forEach(file => {
           content += `- ${file.filename} (${file.mime_type})\n`;
         });
       }
-      
+
       return content;
     }).join('\n\n---\n\n');
 
@@ -139,9 +284,9 @@ const Chat = () => {
     }
   };
 
-  // Separate components for inline code vs code blocks
+  // Enhanced Components for rendering
   const InlineCode = ({ children, ...props }: any) => (
-    <code 
+    <code
       className="bg-gray-100 text-gray-800 px-1.5 py-0.5 rounded text-sm font-mono"
       {...props}
     >
@@ -159,7 +304,6 @@ const Chat = () => {
 
     return (
       <div className="my-4 rounded-lg overflow-hidden border border-gray-200 shadow-sm bg-white">
-        {/* Code block header */}
         <div className="bg-gray-50 px-4 py-2.5 flex items-center justify-between border-b border-gray-200">
           <div className="flex items-center gap-3">
             {shouldShowCollapse && (
@@ -200,8 +344,7 @@ const Chat = () => {
             )}
           </button>
         </div>
-        
-        {/* Code content */}
+
         {!isCollapsed && (
           <div className="relative">
             <pre className="bg-gray-900 text-gray-100 p-4 overflow-x-auto text-sm font-mono leading-relaxed custom-scrollbar max-h-96 overflow-y-auto">
@@ -211,8 +354,7 @@ const Chat = () => {
             </pre>
           </div>
         )}
-        
-        {/* Show preview when collapsed */}
+
         {isCollapsed && (
           <div className="bg-gray-50 px-4 py-3 text-sm text-gray-600">
             <span className="italic">Code block collapsed ({lines.length} lines)</span>
@@ -222,10 +364,11 @@ const Chat = () => {
     );
   };
 
+  // File handling functions
   const handleFileSelect = async (files: FileList) => {
     const fileDataArray: FileData[] = [];
     const maxSize = 10 * 1024 * 1024; // 10MB
-    
+
     const allowedTypes = [
       'image/jpeg', 'image/png', 'image/gif', 'image/webp',
       'text/plain', 'text/csv', 'application/json',
@@ -301,16 +444,16 @@ const Chat = () => {
       };
 
       dispatch(addMessage({ conversationId: activeConversationId, message: userMessage }));
-      
+
       const messageToSend = input;
       const filesToSend = [...selectedFiles];
       dispatch(setInput(''));
       setSelectedFiles([]);
 
       try {
-        await dispatch(sendChatMessageStream({ 
-          message: messageToSend, 
-          files: filesToSend 
+        await dispatch(sendChatMessageStream({
+          message: messageToSend,
+          files: filesToSend
         })).unwrap();
       } catch (error) {
         console.error('Failed to send message:', error);
@@ -325,6 +468,61 @@ const Chat = () => {
     }
   };
 
+  // Editable message component
+  const EditableMessage = ({ msg, onSave, onCancel }: {
+    msg: Message;
+    onSave: (text: string) => void;
+    onCancel: () => void;
+  }) => {
+    const [editText, setEditText] = useState(msg.text);
+
+    const handleSave = () => {
+      if (editText.trim()) {
+        onSave(editText.trim());
+      }
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSave();
+      } else if (e.key === 'Escape') {
+        onCancel();
+      }
+    };
+
+    return (
+      <div className="bg-gray-50 rounded-lg p-4 border-2 border-blue-200 mt-2">
+        <textarea
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+          rows={Math.max(2, editText.split('\n').length)}
+          autoFocus
+        />
+        <div className="flex justify-end gap-2 mt-3">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1 text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1 rounded hover:bg-gray-200 transition-colors"
+          >
+            <X size={14} />
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1 transition-colors"
+            disabled={!editText.trim()}
+          >
+            <Check size={14} />
+            Save & Regenerate
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // File preview functions
   const getFileIcon = (mimeType: string) => {
     if (mimeType.startsWith('image/')) return <Image className="w-4 h-4" />;
     if (mimeType.includes('pdf')) return <FileText className="w-4 h-4" />;
@@ -335,11 +533,11 @@ const Chat = () => {
 
   const renderFilePreview = (file: FileData, index: number, isInMessage = false) => {
     const isImage = file.mime_type.startsWith('image/');
-    
+
     if (isImage) {
       return (
         <div key={index} className="relative inline-block m-1 group">
-          <img 
+          <img
             src={file.url || `data:${file.mime_type};base64,${file.data}`}
             alt={file.filename}
             className={`
@@ -379,25 +577,6 @@ const Chat = () => {
     }
   };
 
-  // Single Consistent Typing Indicator Component
-  const TypingIndicator = () => (
-    <div className="flex items-center gap-3 px-5 py-4">
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600">
-        <Bot className="w-5 h-5 text-white" />
-      </div>
-      <div className="bg-white/90 text-gray-800 border border-gray-200/50 rounded-2xl rounded-tl-lg px-5 py-3 shadow-lg backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-600 font-medium">Xbot is thinking</span>
-          <div className="flex gap-1">
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms', animationDuration: '1.4s' }}></div>
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms', animationDuration: '1.4s' }}></div>
-            <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms', animationDuration: '1.4s' }}></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
   if (!activeConversation) {
     return (
       <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -413,10 +592,9 @@ const Chat = () => {
   }
 
   return (
-    <div 
-      className={`flex-1 flex flex-col h-screen bg-white relative transition-all duration-300 ${
-        dragOver ? 'bg-blue-50' : ''
-      }`}
+    <div
+      className={`flex-1 flex flex-col h-screen bg-white relative transition-all duration-300 ${dragOver ? 'bg-blue-50' : ''
+        }`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -434,7 +612,7 @@ const Chat = () => {
         </div>
       )}
 
-      {/* Enhanced Header with Xbot branding */}
+      {/* Enhanced Header */}
       <div className="px-6 py-4 border-b border-gray-200 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="flex items-center justify-between w-full">
           <div className="flex items-center gap-4">
@@ -447,7 +625,6 @@ const Chat = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {/* Copy Chat Button */}
             {activeConversation.messages.length > 0 && (
               <button
                 onClick={copyChatAsMarkdown}
@@ -475,7 +652,7 @@ const Chat = () => {
         </div>
       </div>
 
-      {/* Messages with custom scrollbar */}
+      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto bg-gradient-to-b from-gray-50 to-gray-100 custom-scrollbar">
         <div className="w-full mx-auto px-4 py-6">
           {activeConversation.messages.length === 0 && !isLoading && (
@@ -493,15 +670,15 @@ const Chat = () => {
               </div>
             </div>
           )}
-          
+
           {activeConversation.messages.map((msg, idx) => (
             <div key={msg.id || idx} className={`mb-8 flex ${msg.sender === 'User' ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex gap-4 max-w-4xl ${msg.sender === 'User' ? 'flex-row-reverse' : 'flex-row'}`}>
                 {/* Avatar */}
                 <div className={`
                   w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-1 shadow-lg
-                  ${msg.sender === 'User' 
-                    ? 'bg-gradient-to-br from-green-500 to-emerald-600' 
+                  ${msg.sender === 'User'
+                    ? 'bg-gradient-to-br from-green-500 to-emerald-600'
                     : 'bg-gradient-to-br from-blue-500 via-purple-500 to-indigo-600'
                   }
                 `}>
@@ -514,172 +691,277 @@ const Chat = () => {
 
                 {/* Message Content */}
                 <div className={`
-                  px-5 py-4 rounded-2xl shadow-lg border backdrop-blur-sm flex-1
-                  ${msg.sender === 'User' 
-                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20' 
+                  px-5 py-4 rounded-2xl shadow-lg border backdrop-blur-sm flex-1 relative group
+                  ${msg.sender === 'User'
+                    ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-blue-600/20'
                     : 'bg-white/90 text-gray-800 border-gray-200/50'
                   }
                   ${msg.sender === 'User' ? 'rounded-tr-lg' : 'rounded-tl-lg'}
                 `}>
-                  
-                  {msg.text && (
-                    <div className="mb-3 last:mb-0">
-                      {msg.sender === 'User' ? (
-                        <div className="whitespace-pre-wrap leading-relaxed text-[15px]">{msg.text}</div>
-                      ) : (
-                        <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                          <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
 
-                          rehypePlugins={[rehypeHighlight, rehypeStripHljs]}
-  components={{
-    code: ({ inline, className, children, ...props }) => {
-      const text = String(children).replace(/\n$/, '')
-      const hasLang = Boolean(className)
-      const isSingleLine = !text.includes('\n')
+                  {/* Action buttons */}
+                  <div className={`absolute top-2 ${msg.sender === 'User' ? 'left-2' : 'right-2'
+                    } flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200`}>
 
-      // 1) true Markdown inline code: `<code>` in text
-      if (inline) {
-        return <InlineCode {...props}>{children}</InlineCode>
-      }
+                    {/* User edit navigation */}
+                    {msg.sender === 'User' && msg.branches && msg.branches.length > 1 && !msg.isEditing && !isLoading && (
+                      <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200 mr-1">
+                        <button
+                          onClick={() => handleNavigateUserEdit(msg.id, 'prev')}
+                          disabled={(msg.currentBranchIndex ?? 0) === 0}
+                          className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="Previous branch"
+                        >
+                          <ChevronLeft className="w-4 h-4 text-gray-600" />
+                        </button>
 
-      // 2) single-line, no language hint → render inline
-      if (isSingleLine && !hasLang) {
-        return <InlineCode {...props}>{children}</InlineCode>
-      }
+                        <span className="text-xs text-gray-500 px-2 font-medium">
+                          {(msg.currentBranchIndex ?? 0) + 1} / {msg.branches.length}
+                        </span>
 
-      // 3) otherwise full code block
-      return <CodeBlock className={className} {...props}>{children}</CodeBlock>
-    },
-    pre: ({ children }) => <>{children}</>,
+                        <button
+                          onClick={() => handleNavigateUserEdit(msg.id, 'next')}
+                          disabled={(msg.currentBranchIndex ?? 0) === msg.branches.length - 1}
+                          className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="Next branch"
+                        >
+                          <ChevronRight className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </div>
+                    )}
 
-                              p: ({ children, ...props }) => (
-                                <p className="mb-3 last:mb-0 leading-relaxed text-gray-700" {...props}>
-                                  {children}
-                                </p>
-                              ),
-                              ul: ({ children, ...props }) => (
-                                <ul className="list-disc ml-5 mb-3 space-y-1" {...props}>
-                                  {children}
-                                </ul>
-                              ),
-                              ol: ({ children, ...props }) => (
-                                <ol className="list-decimal ml-5 mb-3 space-y-1" {...props}>
-                                  {children}
-                                </ol>
-                              ),
-                              li: ({ children, ...props }) => (
-                                <li className="text-gray-700 leading-relaxed" {...props}>
-                                  {children}
-                                </li>
-                              ),
-                              blockquote: ({ children, ...props }) => (
-                                <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-600 my-3 bg-gray-50 py-2 rounded-r" {...props}>
-                                  {children}
-                                </blockquote>
-                              ),
-                              h1: ({ children, ...props }) => (
-                                <h1 className="text-xl font-bold mb-3 text-gray-800 border-b border-gray-200 pb-1" {...props}>
-                                  {children}
-                                </h1>
-                              ),
-                              h2: ({ children, ...props }) => (
-                                <h2 className="text-lg font-bold mb-2 text-gray-800" {...props}>
-                                  {children}
-                                </h2>
-                              ),
-                              h3: ({ children, ...props }) => (
-                                <h3 className="text-base font-semibold mb-2 text-gray-800" {...props}>
-                                  {children}
-                                </h3>
-                              ),
-                              h4: ({ children, ...props }) => (
-                                <h4 className="text-sm font-semibold mb-1 text-gray-800" {...props}>
-                                  {children}
-                                </h4>
-                              ),
-                              strong: ({ children, ...props }) => (
-                                <strong className="font-semibold text-gray-800" {...props}>
-                                  {children}
-                                </strong>
-                              ),
-                              em: ({ children, ...props }) => (
-                                <em className="italic text-gray-700" {...props}>
-                                  {children}
-                                </em>
-                              ),
-                              table: ({ children, ...props }) => (
-                                <div className="overflow-x-auto my-3">
-                                  <table className="min-w-full border border-gray-300 rounded overflow-hidden text-sm" {...props}>
-                                    {children}
-                                  </table>
-                                </div>
-                              ),
-                              thead: ({ children, ...props }) => (
-                                <thead className="bg-gray-100" {...props}>
-                                  {children}
-                                </thead>
-                              ),
-                              tbody: ({ children, ...props }) => (
-                                <tbody className="bg-white" {...props}>
-                                  {children}
-                                </tbody>
-                              ),
-                              tr: ({ children, ...props }) => (
-                                <tr className="border-b border-gray-200" {...props}>
-                                  {children}
-                                </tr>
-                              ),
-                              th: ({ children, ...props }) => (
-                                <th className="px-3 py-2 text-left font-semibold text-gray-800 border-r border-gray-200 last:border-r-0" {...props}>
-                                  {children}
-                                </th>
-                              ),
-                              td: ({ children, ...props }) => (
-                                <td className="px-3 py-2 text-gray-700 border-r border-gray-200 last:border-r-0" {...props}>
-                                  {children}
-                                </td>
-                              ),
-                              a: ({ href, children, ...props }) => (
-                                <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline" {...props}>
-                                  {children}
-                                </a>
-                              ),
-                            }}
-                          >
-                            {msg.text}
-                          </ReactMarkdown>
+                    {/* Bot message navigation and regenerate buttons */}
+                    {msg.sender === 'Bot' && !msg.isStreaming && !isLoading && (
+                      <>
+                        {msg.responses && msg.responses.length > 1 && (
+                          <div className="flex items-center gap-1 bg-white/90 rounded-lg p-1 shadow-sm border border-gray-200">
+                            <button
+                              onClick={() => handleNavigateResponse(msg.id, 'prev')}
+                              disabled={(msg.currentResponseIndex || 0) === 0}
+                              className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              title="Previous response"
+                            >
+                              <ChevronLeft className="w-4 h-4 text-gray-600" />
+                            </button>
+
+                            <span className="text-xs text-gray-500 px-2 font-medium">
+                              {(msg.currentResponseIndex || 0) + 1} / {msg.responses.length}
+                            </span>
+
+                            <button
+                              onClick={() => handleNavigateResponse(msg.id, 'next')}
+                              disabled={(msg.currentResponseIndex || 0) === (msg.responses?.length || 1) - 1}
+                              className="p-1 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              title="Next response"
+                            >
+                              <ChevronRight className="w-4 h-4 text-gray-600" />
+                            </button>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => handleRegenerateResponse(msg.id)}
+                          className="p-1.5 bg-white/90 hover:bg-gray-100 rounded-lg shadow-sm border border-gray-200 transition-all duration-200"
+                          title="Regenerate response"
+                        >
+                          <RotateCcw className="w-4 h-4 text-gray-600" />
+                        </button>
+                      </>
+                    )}
+
+                    {/* User message edit button */}
+                    {msg.sender === 'User' && !msg.isEditing && !isLoading && (
+                      <button
+                        onClick={() => dispatch(toggleMessageEdit(msg.id))}
+                        className="p-1.5 text-white/70 hover:text-white hover:bg-white/20 rounded-lg transition-all duration-200"
+                        title="Edit message"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Message content rendering */}
+                  {msg.isEditing ? (
+                    <EditableMessage
+                      msg={msg}
+                      onSave={(newText) => {
+                        dispatch(regenerateFromMessage({
+                          messageId: msg.id,
+                          newText,
+                          files: msg.files || []
+                        }));
+                      }}
+                      onCancel={() => dispatch(toggleMessageEdit(msg.id))}
+                    />
+                  ) : (
+                    <>
+                      {msg.text && (
+                        <div className="mb-3 last:mb-0">
+                          {msg.sender === 'User' ? (
+                            <div className="whitespace-pre-wrap leading-relaxed text-[15px]">{msg.text}</div>
+                          ) : (
+                            <div className="prose prose-sm max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                              {/* ✅ FIXED ReactMarkdown with enhanced image component */}
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                rehypePlugins={[rehypeHighlight, rehypeStripHljs]}
+                                components={{
+                                  code: ({ inline, className, children, ...props }) => {
+                                    const text = String(children).replace(/\n$/, '')
+                                    const hasLang = Boolean(className)
+                                    const isSingleLine = !text.includes('\n')
+
+                                    if (inline) {
+                                      return <InlineCode {...props}>{children}</InlineCode>
+                                    }
+
+                                    if (isSingleLine && !hasLang) {
+                                      return <InlineCode {...props}>{children}</InlineCode>
+                                    }
+
+                                    return <CodeBlock className={className} {...props}>{children}</CodeBlock>
+                                  },
+                                  pre: ({ children }) => <>{children}</>,
+                                  p: ({ children, ...props }) => (
+                                    <p className="mb-3 last:mb-0 leading-relaxed text-gray-700" {...props}>
+                                      {children}
+                                    </p>
+                                  ),
+                                  ul: ({ children, ...props }) => (
+                                    <ul className="list-disc ml-5 mb-3 space-y-1" {...props}>
+                                      {children}
+                                    </ul>
+                                  ),
+                                  ol: ({ children, ...props }) => (
+                                    <ol className="list-decimal ml-5 mb-3 space-y-1" {...props}>
+                                      {children}
+                                    </ol>
+                                  ),
+                                  li: ({ children, ...props }) => (
+                                    <li className="text-gray-700 leading-relaxed" {...props}>
+                                      {children}
+                                    </li>
+                                  ),
+                                  blockquote: ({ children, ...props }) => (
+                                    <blockquote className="border-l-4 border-gray-300 pl-4 italic text-gray-600 my-3 bg-gray-50 py-2 rounded-r" {...props}>
+                                      {children}
+                                    </blockquote>
+                                  ),
+                                  h1: ({ children, ...props }) => (
+                                    <h1 className="text-xl font-bold mb-3 text-gray-800 border-b border-gray-200 pb-1" {...props}>
+                                      {children}
+                                    </h1>
+                                  ),
+                                  h2: ({ children, ...props }) => (
+                                    <h2 className="text-lg font-bold mb-2 text-gray-800" {...props}>
+                                      {children}
+                                    </h2>
+                                  ),
+                                  h3: ({ children, ...props }) => (
+                                    <h3 className="text-base font-semibold mb-2 text-gray-800" {...props}>
+                                      {children}
+                                    </h3>
+                                  ),
+                                  h4: ({ children, ...props }) => (
+                                    <h4 className="text-sm font-semibold mb-1 text-gray-800" {...props}>
+                                      {children}
+                                    </h4>
+                                  ),
+                                  strong: ({ children, ...props }) => (
+                                    <strong className="font-semibold text-gray-800" {...props}>
+                                      {children}
+                                    </strong>
+                                  ),
+                                  em: ({ children, ...props }) => (
+                                    <em className="italic text-gray-700" {...props}>
+                                      {children}
+                                    </em>
+                                  ),
+                                  table: ({ children, ...props }) => (
+                                    <div className="overflow-x-auto my-3">
+                                      <table className="min-w-full border border-gray-300 rounded overflow-hidden text-sm" {...props}>
+                                        {children}
+                                      </table>
+                                    </div>
+                                  ),
+                                  thead: ({ children, ...props }) => (
+                                    <thead className="bg-gray-100" {...props}>
+                                      {children}
+                                    </thead>
+                                  ),
+                                  tbody: ({ children, ...props }) => (
+                                    <tbody className="bg-white" {...props}>
+                                      {children}
+                                    </tbody>
+                                  ),
+                                  tr: ({ children, ...props }) => (
+                                    <tr className="border-b border-gray-200" {...props}>
+                                      {children}
+                                    </tr>
+                                  ),
+                                  th: ({ children, ...props }) => (
+                                    <th className="px-3 py-2 text-left font-semibold text-gray-800 border-r border-gray-200 last:border-r-0" {...props}>
+                                      {children}
+                                    </th>
+                                  ),
+                                  td: ({ children, ...props }) => (
+                                    <td className="px-3 py-2 text-gray-700 border-r border-gray-200 last:border-r-0" {...props}>
+                                      {children}
+                                    </td>
+                                  ),
+                                  a: ({ href, children, ...props }) => (
+                                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline" {...props}>
+                                      {children}
+                                    </a>
+                                  ),
+                                  // ✅ BULLETPROOF Image Component with comprehensive validation
+                                  img: ({ src, alt, ...props }) => {
+                                    console.log('🔍 ReactMarkdown img src:', { src, type: typeof src });
+
+                                    const imgUrl = imageHistory.length && currentImageIndex !== null
+                                      ? imageHistory[currentImageIndex].url
+                                      : src;
+
+                                    return (
+                                      <div className="my-4 text-center">
+                                        <ImageWithHistory src={src} alt={alt} maxHeight="500px" />
+                                        {alt && <p className="mt-2 text-sm italic text-gray-500">{alt}</p>}
+                                      </div>
+                                    );
+
+                                  }
+                                }}
+                              >
+                                {msg.text}
+                              </ReactMarkdown>
+
+                            </div>
+                          )}
                         </div>
                       )}
-                    </div>
-                  )}
-                  
-                  {msg.files && msg.files.length > 0 && (
-                    <div className="mt-4">
-                      {msg.files.map((file, fileIndex) => renderFilePreview(file, fileIndex, true))}
-                    </div>
-                  )}
-                  
-                  {msg.isStreaming && (
-                    <span className="inline-block w-0.5 h-5 bg-current ml-1 animate-pulse rounded-full"></span>
+
+                      {msg.files && msg.files.length > 0 && (
+                        <div className="mt-4">
+                          {msg.files.map((file, fileIndex) => renderFilePreview(file, fileIndex, true))}
+                        </div>
+                      )}
+
+                      {msg.isStreaming && (
+                        <span className="inline-block w-0.5 h-5 bg-current ml-1 animate-pulse rounded-full"></span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
             </div>
           ))}
-          
-          {/* Typing indicator when loading */}
-          {isLoading && (
-            <div className="mb-8">
-              <TypingIndicator />
-            </div>
-          )}
-          
+
           <div ref={messagesEndRef} />
         </div>
       </div>
 
-      {/* File Preview Area with custom scrollbar */}
+      {/* File Preview Area */}
       {selectedFiles.length > 0 && (
         <div className="bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-lg">
           <div className="max-w-4xl mx-auto px-6 py-4">
@@ -711,7 +993,6 @@ const Chat = () => {
       {/* Enhanced Input Area */}
       <div className="bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-lg">
         <div className="max-w-4xl mx-auto px-6 py-5">
-          {/* Input Container with Perfect Alignment */}
           <div className="flex items-end gap-4">
             {/* File Upload Button */}
             <div className="flex-shrink-0">
@@ -724,7 +1005,7 @@ const Chat = () => {
                 <Plus className="w-5 h-5" />
               </button>
             </div>
-            
+
             {/* Message Input Container */}
             <div className="flex-1 relative">
               <div className="relative flex">
@@ -739,8 +1020,7 @@ const Chat = () => {
                   rows={1}
                   style={{ paddingRight: '60px' }}
                 />
-                
-                {/* Character/File Indicator */}
+
                 {(input.length > 0 || selectedFiles.length > 0) && (
                   <div className="absolute bottom-2 right-16 flex items-center gap-2">
                     {selectedFiles.length > 0 && (
@@ -757,13 +1037,33 @@ const Chat = () => {
                 )}
               </div>
             </div>
-            
+
+            {/* Tool Selection */}
+            <div className="mb-2 flex items-center space-x-2 text-sm">
+              {['chat', 'search', 'image'].map(tool => (
+                <button
+                  key={tool}
+                  onClick={() => setActiveTool(tool as any)}
+                  className={`px-2 py-1 rounded-full transition ${activeTool === tool
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                >
+                  {tool === 'chat' ? 'Chat' : tool === 'search' ? 'Search 🔍' : 'Image 🖼️'}
+                </button>
+              ))}
+            </div>
+
             {/* Send Button */}
             <div className="flex-shrink-0">
               <button
-                onClick={handleSend}
+                onClick={() => {
+                  if (activeTool === 'search') return handleSearch();
+                  if (activeTool === 'image') return handleGenerateImage();
+                  return handleSend();
+                }}
                 disabled={isLoading || (!input.trim() && selectedFiles.length === 0)}
-                className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed text-white rounded-xl transition-all duration-200 shadow-md hover:shadow-lg disabled:shadow-sm flex items-center justify-center border-0 transform hover:scale-105 disabled:transform-none"
+                className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl hover:scale-105 active:scale-95"
               >
                 {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -773,7 +1073,7 @@ const Chat = () => {
               </button>
             </div>
           </div>
-          
+
           {/* Helper Text */}
           <div className="flex items-center justify-between mt-3 px-1">
             <div className="flex items-center gap-4 text-xs text-gray-500">
@@ -787,7 +1087,7 @@ const Chat = () => {
               {input.length > 0 && `${input.length} characters`}
             </div>
           </div>
-          
+
           <input
             ref={fileInputRef}
             type="file"

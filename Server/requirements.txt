@@ -8,3 +8,12 @@ python-dotenv>=1.0.0      # Load .env variables :contentReference[oaicite:6]{ind
 google-genai>=0.1.0       # Gemini API client :contentReference[oaicite:7]{index=7}
 PyPDF2>=3.0.0             # PDF parsing :contentReference[oaicite:8]{index=8}
 python-docx>=0.8.11       # DOCX parsing :contentReference[oaicite:9]{index=9}
+
+langchain_core 
+langchain_anthropic 
+langchain_openai 
+langchain_google_genai 
+langchain_mistralai
+google.generativeai
+googlesearch-python
+huggingface_hub
